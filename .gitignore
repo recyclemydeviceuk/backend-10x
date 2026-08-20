@@ -1,0 +1,87 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+.pnp.*
+
+# Compiled output and test artifacts
+dist/
+build/
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+*.tsbuildinfo
+
+# Environment files and local runtime configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.envrc
+.direnv/
+
+# Credentials, signing material, and cloud service-account files
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.crt
+*.cer
+credentials.json
+credentials-*.json
+*-credentials.json
+service-account.json
+service-account-*.json
+*-service-account.json
+secrets.json
+secrets/
+.secrets/
+.aws/
+
+# Database dumps, exports, and backups
+backup/
+backups/
+dump/
+dumps/
+mongo-dump/
+*.dump
+*.archive
+*.bson
+*.bak
+*.backup
+*.sqlite
+*.sqlite3
+*.db
+
+# Runtime uploads, temporary files, and caches
+uploads/
+storage/
+tmp/
+temp/
+.tmp/
+.cache/
+
+# Logs and process state
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.pid.lock
+
+# Hosting and local tooling
+.vercel/
+.serverless/
+.turbo/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
