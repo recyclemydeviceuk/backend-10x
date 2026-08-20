@@ -10,9 +10,16 @@ const required = (name: string): string => {
 
 const optional = (name: string, fallback = ''): string => process.env[name] ?? fallback;
 
+const nodeEnv = optional('NODE_ENV', 'development');
+// Render exposes RENDER=true to every hosted service. Treat it as production
+// even when NODE_ENV was not added manually in the dashboard; otherwise
+// Express emits insecure Lax cookies that a separate storefront origin cannot
+// use for login, cart, or checkout.
+const isProd = nodeEnv === 'production' || optional('RENDER') === 'true';
+
 export const env = {
-  nodeEnv: optional('NODE_ENV', 'development'),
-  isProd: optional('NODE_ENV') === 'production',
+  nodeEnv,
+  isProd,
   port: Number(optional('PORT', '4000')),
 
   mongoUri: required('MONGODB_URI'),

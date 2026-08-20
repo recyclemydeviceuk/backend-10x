@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { Request, Response } from 'express';
 import { CartSession } from '../models/CartSession';
-import { env } from '../config/env';
+import { SESSION_COOKIE_OPTIONS } from '../utils/sessionCookie';
 
 export const CART_COOKIE = '10x_cart_session';
 export const CART_EXPIRES_MS = 30 * 86400_000;
@@ -19,11 +19,8 @@ export function ensureCartSession(req: Request, res: Response): string {
   if (existing) return existing;
   const id = crypto.randomBytes(32).toString('base64url');
   res.cookie(CART_COOKIE, id, {
-    httpOnly: true,
-    secure: env.isProd,
-    sameSite: 'lax',
+    ...SESSION_COOKIE_OPTIONS,
     maxAge: CART_EXPIRES_MS,
-    path: '/',
   });
   return id;
 }
@@ -88,5 +85,5 @@ export async function cartForRequest(req: Request, res: Response, customerId: st
 export async function clearCartForRequest(req: Request, res?: Response): Promise<void> {
   const sessionId = cookieValue(req, CART_COOKIE);
   if (sessionId) await CartSession.deleteOne({ sessionId });
-  res?.clearCookie(CART_COOKIE, { httpOnly: true, secure: env.isProd, sameSite: 'lax', path: '/' });
+  res?.clearCookie(CART_COOKIE, SESSION_COOKIE_OPTIONS);
 }
