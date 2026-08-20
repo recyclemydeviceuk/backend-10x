@@ -7,7 +7,7 @@ Express + TypeScript + MongoDB Atlas backend shared by the storefront and admin 
 - MongoDB is the only business-data store: catalogue, customers, carts, orders, subscriptions, returns, settings, analytics events, admin profile/preferences, and backup history.
 - All credentials and infrastructure configuration live only in `server/.env`: MongoDB, admin sign-in, JWT secrets, Cashfree, Shiprocket, S3, SES, backup schedule, and sync key.
 - There is no admin endpoint or UI for listing, revealing, saving, or deleting infrastructure keys.
-- Admin sign-in is checked against `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The database holds only the editable display profile and preferences.
+- The primary admin identity and sign-in are checked against `ADMIN_NAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD`. MongoDB holds only that account's photo, notification state, and panel preferences.
 
 ## Run
 

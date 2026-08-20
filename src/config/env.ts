@@ -29,7 +29,7 @@ export const env = {
   adminJwtSecret: optional('ADMIN_JWT_SECRET') || required('JWT_SECRET'),
   adminEmail: required('ADMIN_EMAIL').trim().toLowerCase(),
   adminPassword: required('ADMIN_PASSWORD'),
-  adminName: optional('ADMIN_NAME', 'Khushnood').trim() || 'Khushnood',
+  adminName: required('ADMIN_NAME').trim(),
 
   corsOrigins: optional('CORS_ORIGINS', 'http://localhost:3000,http://localhost:3010')
     .split(',')

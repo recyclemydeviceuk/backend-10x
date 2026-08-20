@@ -72,7 +72,7 @@ adminTeamRouter.get('/', requirePermission('team.view'), asyncHandler(async (_re
     members: [
       {
         id: 'primary',
-        name: primary.name,
+        name: env.adminName,
         email: env.adminEmail,
         roleId: 'super-admin',
         roleName: 'Super Admin',

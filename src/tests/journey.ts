@@ -15,6 +15,7 @@
 process.env.MONGODB_URI = 'mongodb://placeholder'; // replaced below
 process.env.JWT_SECRET = 'journey-test-secret';
 process.env.ADMIN_JWT_SECRET = 'journey-test-admin-secret';
+process.env.ADMIN_NAME = 'Environment Owner';
 process.env.ADMIN_EMAIL = 'founder@10xdrink.com';
 process.env.ADMIN_PASSWORD = 'TakeCharge10x!';
 process.env.NODE_ENV = 'test';

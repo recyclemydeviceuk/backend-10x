@@ -25,8 +25,8 @@ function secureEqual(input: string, expected: string): boolean {
 
 const primaryView = (profile: Awaited<ReturnType<typeof getAdminProfile>>) => ({
   id: 'primary',
-  name: profile.name,
-  email: profile.email,
+  name: env.adminName,
+  email: env.adminEmail,
   avatarUrl: profile.avatarUrl,
   readNotificationIds: profile.readNotificationIds,
   preferences: profile.preferences,

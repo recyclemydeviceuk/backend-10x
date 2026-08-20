@@ -7,6 +7,7 @@
 process.env.MONGODB_URI = 'mongodb://placeholder'; // replaced below
 process.env.JWT_SECRET = 'smoke-test-secret';
 process.env.ADMIN_JWT_SECRET = 'smoke-test-admin-secret';
+process.env.ADMIN_NAME = 'Environment Owner';
 process.env.ADMIN_EMAIL = 'founder@10xdrink.com';
 process.env.ADMIN_PASSWORD = 'TakeCharge10x!';
 process.env.AWS_S3_ACCESS_KEY_ID = '';
@@ -30,6 +31,7 @@ async function main() {
   const { connectDb, disconnectDb } = await import('../db/connect');
   const { createApp } = await import('../app');
   const { Product } = await import('../models/Product');
+  const { AdminProfile } = await import('../models/AdminProfile');
 
   await connectDb(mongod.getUri());
   const app = createApp();
@@ -69,6 +71,17 @@ async function main() {
   });
   const tierId = product.tiers[0].id;
 
+  // Simulate the stale identity written by an older deployment. The current
+  // build must discard it and use only the backend environment identity.
+  await AdminProfile.collection.insertOne({
+    _id: 'primary',
+    name: 'Old Database Admin',
+    email: 'old-admin@example.com',
+    avatarUrl: 'https://cdn.example.com/admin.webp',
+    readNotificationIds: [],
+    preferences: { fontScale: 100, density: 'comfortable', sidebarCollapsed: false, reduceMotion: false },
+  } as any);
+
   /* ------------------------------------------------------------- tests */
   console.log('health + catalog');
   check('GET /health', (await api('/health')).body.ok === true);
@@ -78,7 +91,28 @@ async function main() {
   console.log('environment-only admin auth');
   const adminLogin = await api('/api/v1/admin/auth/login', json({ email: 'founder@10xdrink.com', password: 'TakeCharge10x!' }));
   check('admin login', adminLogin.status === 200 && Boolean(adminLogin.body.token));
+  check(
+    'primary identity comes from env while database-backed profile settings remain',
+    adminLogin.body.user?.name === 'Environment Owner'
+      && adminLogin.body.user?.email === 'founder@10xdrink.com'
+      && adminLogin.body.user?.avatarUrl === 'https://cdn.example.com/admin.webp',
+    JSON.stringify(adminLogin.body),
+  );
   const adminToken = adminLogin.body.token as string;
+  const storedPrimary = await AdminProfile.collection.findOne({ _id: 'primary' } as any);
+  check(
+    'legacy primary identity is removed from MongoDB',
+    storedPrimary !== null && !('name' in storedPrimary) && !('email' in storedPrimary),
+    JSON.stringify(storedPrimary),
+  );
+  const adminMe = await api('/api/v1/admin/auth/me', { headers: { authorization: `Bearer ${adminToken}` } });
+  check('admin session resolves the env identity', adminMe.body.user?.name === 'Environment Owner' && adminMe.body.user?.email === 'founder@10xdrink.com');
+  const primaryIdentityEdit = await api('/api/v1/admin/profile', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ name: 'Database Override' }),
+  });
+  check('the panel cannot override the environment owner identity', primaryIdentityEdit.status === 400);
 
   const badLogin = await api('/api/v1/admin/auth/login', json({ email: 'founder@10xdrink.com', password: 'wrong' }));
   check('admin login rejects bad password', badLogin.status === 401);

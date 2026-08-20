@@ -5,6 +5,7 @@ import { ApiError } from '../utils/ApiError';
 import { getAdminProfile } from '../models/AdminProfile';
 import { AdminUser } from '../models/AdminUser';
 import { Role } from '../models/Role';
+import { env } from '../config/env';
 
 export type AdminContext = {
   id: string;
@@ -54,8 +55,8 @@ export async function requireAdmin(req: Request, _res: Response, next: NextFunct
       const profile = await getAdminProfile();
       req.admin = {
         id: 'primary',
-        name: profile.name,
-        email: profile.email,
+        name: env.adminName,
+        email: env.adminEmail,
         roleId: 'super-admin',
         roleName: 'Super Admin',
         permissions: ['*'],

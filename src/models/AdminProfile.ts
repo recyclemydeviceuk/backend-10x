@@ -1,12 +1,7 @@
 import { Schema, model } from 'mongoose';
-import { env } from '../config/env';
-
 const adminProfileSchema = new Schema(
   {
     _id: { type: String, default: 'primary' },
-    name: { type: String, required: true, trim: true, default: () => env.adminName },
-    /** Contact/display email. The sign-in identifier remains ADMIN_EMAIL. */
-    email: { type: String, required: true, lowercase: true, trim: true, default: () => env.adminEmail },
     avatarUrl: { type: String, default: '' },
     readNotificationIds: { type: [String], default: [] },
     preferences: {
@@ -24,7 +19,12 @@ export const AdminProfile = model('AdminProfile', adminProfileSchema);
 export async function getAdminProfile() {
   return AdminProfile.findOneAndUpdate(
     { _id: 'primary' },
-    { $setOnInsert: { _id: 'primary', name: env.adminName, email: env.adminEmail } },
-    { new: true, upsert: true, setDefaultsOnInsert: true },
+    {
+      $setOnInsert: { _id: 'primary' },
+      // Remove identity values written by older builds. The primary admin's
+      // name/email/password are environment configuration, never database data.
+      $unset: { name: '', email: '' },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true, strict: false },
   );
 }

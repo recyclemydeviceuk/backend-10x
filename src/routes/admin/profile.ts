@@ -22,7 +22,18 @@ const editableProfile = async (adminId: string) => {
 };
 
 const profileView = async (adminId: string) => {
-  const profile = await editableProfile(adminId);
+  if (adminId === 'primary') {
+    const profile = await getAdminProfile();
+    return {
+      name: env.adminName,
+      email: env.adminEmail,
+      avatarUrl: profile.avatarUrl,
+      readNotificationIds: profile.readNotificationIds,
+      preferences: profile.preferences,
+    };
+  }
+  const profile = await AdminUser.findById(adminId);
+  if (!profile) throw ApiError.notFound('Admin profile not found.');
   return {
     name: profile.name,
     email: profile.email,
@@ -80,17 +91,24 @@ adminProfileRouter.patch(
     }).optional(),
   })),
   asyncHandler(async (req, res) => {
-    const profile = await editableProfile(req.admin!.id);
-    if (req.body.name !== undefined) profile.name = req.body.name;
-    // The owner account's email is fixed in the server's .env — only the
-    // display name is editable. Team members may change their own email.
-    if (req.body.email !== undefined && req.admin!.id === 'primary' && req.body.email !== env.adminEmail) {
-      throw ApiError.badRequest("The Super Admin email is configured in the server's .env file and cannot change here.");
+    if (req.admin!.id === 'primary') {
+      if (req.body.name !== undefined || req.body.email !== undefined) {
+        throw ApiError.badRequest("The Super Admin name and email are configured in the server's .env file and cannot change here.");
+      }
+      const profile = await getAdminProfile();
+      if (req.body.readNotificationIds !== undefined) profile.readNotificationIds = req.body.readNotificationIds;
+      if (req.body.preferences && profile.preferences) Object.assign(profile.preferences, req.body.preferences);
+      await profile.save();
+      return res.json({ ok: true, message: 'Admin preferences saved.', profile: await profileView('primary') });
     }
-    if (req.body.email !== undefined) profile.email = req.body.email;
-    if (req.body.readNotificationIds !== undefined) profile.readNotificationIds = req.body.readNotificationIds;
-    if (req.body.preferences && profile.preferences) Object.assign(profile.preferences, req.body.preferences);
-    await profile.save();
+
+    const member = await AdminUser.findById(req.admin!.id);
+    if (!member) throw ApiError.notFound('Admin profile not found.');
+    if (req.body.name !== undefined) member.name = req.body.name;
+    if (req.body.email !== undefined) member.email = req.body.email;
+    if (req.body.readNotificationIds !== undefined) member.readNotificationIds = req.body.readNotificationIds;
+    if (req.body.preferences && member.preferences) Object.assign(member.preferences, req.body.preferences);
+    await member.save();
     res.json({ ok: true, message: 'Admin preferences saved.', profile: await profileView(req.admin!.id) });
   }),
 );
