@@ -3,20 +3,24 @@ import type { OrderDoc } from '../models/Order';
 import { env } from '../config/env';
 import { getSettings } from '../models/Setting';
 
-// 10X transactional email system.
-// One restrained visual language across every message: true ink, white and
-// the brand lawn green. Every template uses the canonical storefront logo.
+// 10X transactional email.
+//
+// One quiet layout for every message: white paper, black type, a single
+// green rule and a green button. The logo is the storefront's black mark on
+// white — never a dark band. Copy is short and plain: what happened, what
+// (if anything) to do next.
 
 const BRAND = {
   ink: '#000204',
   green: '#6DE325',
   greenDark: '#4EA310',
   paper: '#FFFFFF',
-  canvas: '#F4F5F2',
-  line: '#E5E7E2',
-  muted: '#69706A',
-  soft: '#F7F8F5',
+  line: '#E6E8E4',
+  muted: '#5F665F',
+  soft: '#F6F8F4',
 } as const;
+
+const FONT = `'Helvetica Neue',Helvetica,Arial,sans-serif`;
 
 const inr = (amount: number) => `₹${Math.round(amount).toLocaleString('en-IN')}`;
 
@@ -44,55 +48,66 @@ function firstName(name: string): string {
 type Detail = { label: string; value: string };
 type Action = { label: string; href: string };
 
+/** Body copy. Already-escaped HTML may be passed (callers escape user data). */
 function paragraph(copy: string): string {
-  return `<p style="margin:0 0 22px;color:${BRAND.muted};font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;">${copy}</p>`;
+  return `<p style="margin:0 0 18px;color:${BRAND.ink};font-family:${FONT};font-size:15px;line-height:1.7;">${copy}</p>`;
 }
 
+/** Secondary note — smaller, grey. */
+function note(copy: string): string {
+  return `<p style="margin:0 0 18px;color:${BRAND.muted};font-family:${FONT};font-size:13px;line-height:1.7;">${copy}</p>`;
+}
+
+/** Label / value rows, hairline-separated. */
 function details(rows: Detail[]): string {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0;border-collapse:collapse;border-top:1px solid ${BRAND.line};">
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;border-collapse:collapse;">
     ${rows
       .map(
         (row) => `<tr>
-          <td style="padding:13px 0;border-bottom:1px solid ${BRAND.line};color:${BRAND.muted};font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.4;text-transform:uppercase;letter-spacing:.08em;">${escapeHtml(row.label)}</td>
-          <td align="right" style="padding:13px 0;border-bottom:1px solid ${BRAND.line};color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;line-height:1.4;">${escapeHtml(row.value)}</td>
+          <td style="padding:12px 0;border-top:1px solid ${BRAND.line};color:${BRAND.muted};font-family:${FONT};font-size:13px;line-height:1.4;">${escapeHtml(row.label)}</td>
+          <td align="right" style="padding:12px 0;border-top:1px solid ${BRAND.line};color:${BRAND.ink};font-family:${FONT};font-size:14px;font-weight:700;line-height:1.4;">${escapeHtml(row.value)}</td>
         </tr>`,
       )
       .join('')}
+    <tr><td colspan="2" style="border-top:1px solid ${BRAND.line};font-size:0;line-height:0;">&nbsp;</td></tr>
   </table>`;
 }
 
-function focusValue(label: string, value: string, note = ''): string {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0;border-collapse:collapse;background:${BRAND.ink};">
-    <tr><td align="center" style="padding:24px;">
-      <div style="color:#AEB4AE;font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;">${escapeHtml(label)}</div>
-      <div style="margin-top:8px;color:${BRAND.green};font-family:Arial,Helvetica,sans-serif;font-size:26px;font-weight:800;letter-spacing:.08em;line-height:1.2;">${escapeHtml(value)}</div>
-      ${note ? `<div style="margin-top:8px;color:#D8DCD7;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;">${escapeHtml(note)}</div>` : ''}
+/** One value that matters — a code, a temporary password. Large, on a light green field. */
+function focusValue(label: string, value: string, hint = ''): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;border-collapse:collapse;">
+    <tr><td align="center" style="padding:26px 20px;background:${BRAND.soft};border-left:4px solid ${BRAND.green};">
+      <div style="color:${BRAND.muted};font-family:${FONT};font-size:12px;line-height:1.4;">${escapeHtml(label)}</div>
+      <div style="margin-top:8px;color:${BRAND.ink};font-family:${FONT};font-size:30px;font-weight:700;letter-spacing:.12em;line-height:1.2;">${escapeHtml(value)}</div>
+      ${hint ? `<div style="margin-top:8px;color:${BRAND.muted};font-family:${FONT};font-size:12px;line-height:1.5;">${escapeHtml(hint)}</div>` : ''}
     </td></tr>
   </table>`;
 }
 
+/** Quoted message — theirs or ours. */
 function quote(copy: string): string {
-  return `<div style="margin:26px 0;padding:18px 20px;border-left:4px solid ${BRAND.green};background:${BRAND.soft};color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.65;">${lineBreaks(copy)}</div>`;
+  return `<div style="margin:8px 0 24px;padding:16px 20px;border-left:4px solid ${BRAND.green};background:${BRAND.soft};color:${BRAND.ink};font-family:${FONT};font-size:14px;line-height:1.7;">${lineBreaks(copy)}</div>`;
 }
 
 function orderSummary(order: Pick<OrderDoc, 'items' | 'discount' | 'shippingFee' | 'total'>): string {
+  const cell = `padding:12px 0;border-top:1px solid ${BRAND.line};font-family:${FONT};font-size:14px;line-height:1.5;`;
   const itemRows = order.items
     .map(
       (item) => `<tr>
-        <td style="padding:11px 0;border-bottom:1px solid ${BRAND.line};color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;">
-          ${escapeHtml(item.name)}${item.tierName ? ` <span style="color:${BRAND.muted};">· ${escapeHtml(item.tierName)}</span>` : ''}
-          <span style="color:${BRAND.muted};"> × ${item.quantity}</span>
+        <td style="${cell}color:${BRAND.ink};">
+          ${escapeHtml(item.name)}${item.tierName ? `<span style="color:${BRAND.muted};"> · ${escapeHtml(item.tierName)}</span>` : ''}<span style="color:${BRAND.muted};"> × ${item.quantity}</span>
         </td>
-        <td align="right" style="padding:11px 0;border-bottom:1px solid ${BRAND.line};color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;">${inr(item.unitPrice * item.quantity)}</td>
+        <td align="right" style="${cell}color:${BRAND.ink};font-weight:700;">${inr(item.unitPrice * item.quantity)}</td>
       </tr>`,
     )
     .join('');
+  const small = `padding:8px 0;font-family:${FONT};font-size:13px;line-height:1.5;`;
 
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0;border-collapse:collapse;">
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 24px;border-collapse:collapse;">
     ${itemRows}
-    ${order.discount > 0 ? `<tr><td style="padding-top:12px;color:${BRAND.muted};font-family:Arial,Helvetica,sans-serif;font-size:13px;">Discount</td><td align="right" style="padding-top:12px;color:${BRAND.greenDark};font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;">−${inr(order.discount)}</td></tr>` : ''}
-    <tr><td style="padding-top:8px;color:${BRAND.muted};font-family:Arial,Helvetica,sans-serif;font-size:13px;">Delivery</td><td align="right" style="padding-top:8px;color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:13px;">${order.shippingFee > 0 ? inr(order.shippingFee) : 'Free'}</td></tr>
-    <tr><td style="padding-top:15px;color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:800;">Total</td><td align="right" style="padding-top:15px;color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:800;">${inr(order.total)}</td></tr>
+    ${order.discount > 0 ? `<tr><td style="${small}padding-top:14px;border-top:1px solid ${BRAND.line};color:${BRAND.muted};">Discount</td><td align="right" style="${small}padding-top:14px;border-top:1px solid ${BRAND.line};color:${BRAND.greenDark};font-weight:700;">−${inr(order.discount)}</td></tr>` : ''}
+    <tr><td style="${small}${order.discount > 0 ? '' : `padding-top:14px;border-top:1px solid ${BRAND.line};`}color:${BRAND.muted};">Delivery</td><td align="right" style="${small}${order.discount > 0 ? '' : `padding-top:14px;border-top:1px solid ${BRAND.line};`}color:${BRAND.ink};">${order.shippingFee > 0 ? inr(order.shippingFee) : 'Free'}</td></tr>
+    <tr><td style="padding:14px 0 0;border-top:1px solid ${BRAND.line};color:${BRAND.ink};font-family:${FONT};font-size:15px;font-weight:700;">Total</td><td align="right" style="padding:14px 0 0;border-top:1px solid ${BRAND.line};color:${BRAND.ink};font-family:${FONT};font-size:20px;font-weight:700;">${inr(order.total)}</td></tr>
   </table>`;
 }
 
@@ -105,10 +120,12 @@ function template(input: {
   footer?: string;
 }): string {
   const storeUrl = escapeHtml(env.storefrontUrl);
-  const logoUrl = escapeHtml(`${env.storefrontUrl.replace(/\/$/, '')}/logo-white.png`);
+  const storeHost = escapeHtml(env.storefrontUrl.replace(/^https?:\/\//, '').replace(/\/$/, ''));
+  // The storefront's own black logo, on white — one mark everywhere.
+  const logoUrl = escapeHtml(`${env.storefrontUrl.replace(/\/$/, '')}/logo.png`);
   const action = input.action
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:30px 0 4px;"><tr><td bgcolor="${BRAND.green}" style="background:${BRAND.green};">
-        <a href="${escapeHtml(input.action.href)}" style="display:inline-block;padding:14px 22px;color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:800;letter-spacing:.08em;text-decoration:none;text-transform:uppercase;">${escapeHtml(input.action.label)}</a>
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 8px;"><tr><td bgcolor="${BRAND.green}" style="background:${BRAND.green};border-radius:2px;">
+        <a href="${escapeHtml(input.action.href)}" style="display:inline-block;padding:14px 24px;color:${BRAND.ink};font-family:${FONT};font-size:14px;font-weight:700;text-decoration:none;">${escapeHtml(input.action.label)}</a>
       </td></tr></table>`
     : '';
 
@@ -118,33 +135,34 @@ function template(input: {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light only" />
   <title>${escapeHtml(input.title)}</title>
-  <style>@media only screen and (max-width:620px){.email-shell{width:100%!important}.email-pad{padding:30px 24px!important}.email-frame{padding:0!important}}</style>
+  <style>@media only screen and (max-width:620px){.email-shell{width:100%!important}.email-pad{padding:28px 22px!important}.email-head{padding:26px 22px 0!important}}</style>
 </head>
-<body style="margin:0;padding:0;background:${BRAND.canvas};color:${BRAND.ink};">
+<body style="margin:0;padding:0;background:${BRAND.paper};color:${BRAND.ink};">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(input.preheader)}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:${BRAND.canvas};">
-    <tr><td class="email-frame" align="center" style="padding:34px 16px;">
-      <table class="email-shell" role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;border-collapse:collapse;background:${BRAND.paper};">
-        <tr><td style="padding:20px 34px;background:${BRAND.ink};">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-            <td>
-              <img src="${logoUrl}" width="62" height="30" alt="10X" style="display:block;width:62px;height:auto;border:0;outline:none;text-decoration:none;" />
-            </td>
-            <td align="right" style="color:#AEB4AE;font-family:Arial,Helvetica,sans-serif;font-size:9px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;">The Brain Battery</td>
-          </tr></table>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:${BRAND.paper};">
+    <tr><td align="center" style="padding:28px 16px;">
+      <table class="email-shell" role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:560px;max-width:560px;border-collapse:collapse;background:${BRAND.paper};">
+        <tr><td class="email-head" style="padding:18px 36px 0;">
+          <a href="${storeUrl}" style="display:inline-block;text-decoration:none;">
+            <img src="${logoUrl}" width="72" height="35" alt="10X" style="display:block;width:72px;height:auto;border:0;outline:none;" />
+          </a>
         </td></tr>
-        <tr><td style="height:4px;background:${BRAND.green};font-size:0;line-height:0;">&nbsp;</td></tr>
-        <tr><td class="email-pad" style="padding:42px 42px 38px;">
-          <div style="margin:0 0 12px;color:${BRAND.greenDark};font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:800;letter-spacing:.15em;text-transform:uppercase;">${escapeHtml(input.label)}</div>
-          <h1 style="margin:0 0 18px;color:${BRAND.ink};font-family:Arial,Helvetica,sans-serif;font-size:28px;font-weight:800;letter-spacing:-.035em;line-height:1.15;">${escapeHtml(input.title)}</h1>
+        <tr><td style="padding:22px 36px 0;"><div style="height:3px;width:44px;background:${BRAND.green};font-size:0;line-height:0;">&nbsp;</div></td></tr>
+        <tr><td class="email-pad" style="padding:28px 36px 36px;">
+          <div style="margin:0 0 10px;color:${BRAND.greenDark};font-family:${FONT};font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">${escapeHtml(input.label)}</div>
+          <h1 style="margin:0 0 20px;color:${BRAND.ink};font-family:${FONT};font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.2;">${escapeHtml(input.title)}</h1>
           ${input.body}
           ${action}
         </td></tr>
-        <tr><td style="padding:22px 34px;border-top:1px solid ${BRAND.line};background:${BRAND.paper};">
-          <p style="margin:0;color:${BRAND.muted};font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;">
-            ${escapeHtml(input.footer ?? 'This is a transactional message from 10X.')}
-            &nbsp;·&nbsp; <a href="${storeUrl}" style="color:${BRAND.ink};font-weight:700;text-decoration:none;">10xdrink.com</a>
+        <tr><td style="padding:20px 36px 8px;border-top:1px solid ${BRAND.line};">
+          <p style="margin:0;color:${BRAND.muted};font-family:${FONT};font-size:12px;line-height:1.7;">
+            ${escapeHtml(input.footer ?? 'You’re receiving this because of activity on your 10X account.')}
+          </p>
+          <p style="margin:10px 0 0;color:${BRAND.muted};font-family:${FONT};font-size:12px;line-height:1.7;">
+            <a href="${storeUrl}" style="color:${BRAND.ink};font-weight:700;text-decoration:none;">${storeHost}</a>
+            &nbsp;·&nbsp; 10X — Fuel better thinking.
           </p>
         </td></tr>
       </table>
@@ -156,14 +174,16 @@ function template(input: {
 
 function plain(title: string, blocks: Array<string | null | undefined>, action?: Action): string {
   return [
-    '10X — THE BRAIN BATTERY',
+    '10X',
     '',
     title,
     '',
     ...blocks.filter(Boolean),
     ...(action ? ['', `${action.label}: ${action.href}`] : []),
     '',
-    '10xdrink.com',
+    '—',
+    env.storefrontUrl.replace(/^https?:\/\//, ''),
+    'Fuel better thinking.',
   ].join('\n');
 }
 
@@ -178,7 +198,7 @@ export const emails = {
   async orderConfirmed(order: OrderLike) {
     const cod = order.paymentMethod === 'cod';
     const action = { label: 'View order', href: `${env.storefrontUrl}/account/orders` };
-    const title = `Order ${order.reference} is confirmed.`;
+    const title = 'Thanks — your order is in.';
     return sendEmail({
       to: [{ email: order.customerEmail, name: order.customerName }],
       subject: `${order.reference} confirmed · 10X`,
@@ -187,16 +207,16 @@ export const emails = {
         label: 'Order confirmed',
         title,
         body:
-          paragraph(`Hi ${escapeHtml(firstName(order.customerName))}, we have your order and will let you know when it ships.`) +
+          paragraph(`Hi ${escapeHtml(firstName(order.customerName))}, we’ve got it. We’ll email you again the moment it ships.`) +
           orderSummary(order) +
           details([
             { label: 'Order', value: order.reference },
-            { label: 'Payment', value: cod ? `${inr(order.total)} on delivery` : 'Paid online' },
+            { label: 'Payment', value: cod ? `${inr(order.total)}, cash on delivery` : 'Paid' },
           ]),
         action,
       }),
       text: plain(title, [
-        `Hi ${firstName(order.customerName)}, we have your order and will let you know when it ships.`,
+        `Hi ${firstName(order.customerName)}, we’ve got it. We’ll email you again the moment it ships.`,
         `Order: ${order.reference}`,
         `Total: ${inr(order.total)}`,
         `Payment: ${cod ? 'Cash on delivery' : 'Paid online'}`,
@@ -208,7 +228,7 @@ export const emails = {
     const courier = order.shipment?.courier || order.courier || 'Courier partner';
     const tracking = order.shipment?.awb || order.trackingNumber || 'Updating shortly';
     const action = { label: 'Track order', href: `${env.storefrontUrl}/account/orders` };
-    const title = 'Your order is on the way.';
+    const title = 'It’s on the way.';
     return sendEmail({
       to: [{ email: order.customerEmail, name: order.customerName }],
       subject: `${order.reference} has shipped · 10X`,
@@ -216,7 +236,7 @@ export const emails = {
         preheader: `Order ${order.reference} has shipped with ${courier}.`,
         label: 'Order shipped',
         title,
-        body: paragraph('Your parcel has left us. Tracking may take a few hours to update.') + details([
+        body: paragraph('Your box has left our warehouse. Tracking can take a few hours to show the first scan.') + details([
           { label: 'Order', value: order.reference },
           { label: 'Courier', value: courier },
           { label: 'Tracking', value: tracking },
@@ -229,7 +249,7 @@ export const emails = {
 
   async orderDelivered(order: OrderLike) {
     const action = { label: 'View order', href: `${env.storefrontUrl}/account/orders` };
-    const title = 'Delivered.';
+    const title = 'Delivered. Enjoy.';
     return sendEmail({
       to: [{ email: order.customerEmail, name: order.customerName }],
       subject: `${order.reference} delivered · 10X`,
@@ -237,7 +257,7 @@ export const emails = {
         preheader: `Order ${order.reference} has been delivered.`,
         label: 'Order delivered',
         title,
-        body: paragraph(`Order ${escapeHtml(order.reference)} has arrived. If anything is not right, you can request a return from your account within 7 days.`),
+        body: paragraph(`Order ${escapeHtml(order.reference)} has reached you.`) + note('Not right? You can start a return from your account within 7 days of delivery.'),
         action,
       }),
       text: plain(title, [`Order ${order.reference} has arrived.`, 'Returns can be requested from your account within 7 days.'], action),
@@ -247,7 +267,7 @@ export const emails = {
   async orderCancelled(order: OrderLike) {
     const paid = order.paymentMethod === 'online' && ['paid', 'refunded'].includes(order.paymentStatus);
     const action = { label: 'View orders', href: `${env.storefrontUrl}/account/orders` };
-    const title = 'Your order is cancelled.';
+    const title = 'This order is cancelled.';
     return sendEmail({
       to: [{ email: order.customerEmail, name: order.customerName }],
       subject: `${order.reference} cancelled · 10X`,
@@ -258,13 +278,13 @@ export const emails = {
         body: details([
           { label: 'Order', value: order.reference },
           { label: 'Total', value: inr(order.total) },
-        ]) + paragraph(paid ? 'If payment was collected, the refund is handled separately and we will confirm it by email.' : 'No payment is due for this order.'),
+        ]) + paragraph(paid ? 'Your payment is being refunded to the card or account you paid with. We’ll email you when it’s sent.' : 'Nothing has been charged.'),
         action,
       }),
       text: plain(title, [
         `Order: ${order.reference}`,
         `Total: ${inr(order.total)}`,
-        paid ? 'Any collected payment is handled through the refund process.' : 'No payment is due.',
+        paid ? 'Your payment is being refunded — we’ll email you when it’s sent.' : 'Nothing has been charged.',
       ], action),
     });
   },
@@ -272,8 +292,8 @@ export const emails = {
   async orderRefunded(order: OrderLike) {
     const online = order.paymentMethod === 'online';
     const action = { label: 'View order', href: `${env.storefrontUrl}/account/orders` };
-    const title = 'Your refund has been issued.';
-    const timing = online ? 'Your bank may take 5–7 working days to show it.' : 'Our team will contact you about the payout.';
+    const title = 'Your refund is on its way.';
+    const timing = online ? 'It goes back to the card or account you paid with. Banks usually take 5–7 working days to show it.' : 'We’ll be in touch to arrange the payout.';
     return sendEmail({
       to: [{ email: order.customerEmail, name: order.customerName }],
       subject: `Refund issued for ${order.reference} · 10X`,
@@ -284,7 +304,7 @@ export const emails = {
         body: details([
           { label: 'Order', value: order.reference },
           { label: 'Amount', value: inr(order.total) },
-          { label: 'Method', value: online ? 'Original payment method' : 'Manual payout' },
+          { label: 'Sent to', value: online ? 'The way you paid' : 'Bank transfer' },
         ]) + paragraph(timing),
         action,
       }),
@@ -304,28 +324,28 @@ export const emails = {
     const copy = {
       requested: {
         label: 'Return received',
-        title: 'We have your return request.',
-        note: 'Our team will review it within 1–2 working days.',
+        title: 'We’ve got your return request.',
+        note: 'We’ll look at it within 1–2 working days and email you either way.',
       },
       approved: {
         label: 'Return approved',
-        title: 'Your pickup is approved.',
-        note: 'Keep the product and packaging ready for the courier.',
+        title: 'Your return is approved.',
+        note: 'A courier will come to collect it. Keep the product and its box ready.',
       },
       received: {
         label: 'Return received',
-        title: 'Your parcel is back with us.',
-        note: 'We are now processing the refund.',
+        title: 'Your return has arrived.',
+        note: 'We’re sending your refund now.',
       },
       refunded: {
         label: 'Return refunded',
-        title: 'Your refund has been issued.',
-        note: 'Your bank may take 5–7 working days to show it.',
+        title: 'Your refund is on its way.',
+        note: 'Banks usually take 5–7 working days to show it.',
       },
       rejected: {
         label: 'Return update',
-        title: 'We could not approve this return.',
-        note: args.rejectReason ? `Reason: ${args.rejectReason}` : 'Reply to this email if you need us to review it again.',
+        title: 'We couldn’t approve this return.',
+        note: args.rejectReason ? `Reason: ${args.rejectReason}` : 'Reply to this email if you’d like us to take another look.',
       },
     }[args.status];
     const action = { label: 'View return', href: `${env.storefrontUrl}/account` };
@@ -364,7 +384,7 @@ export const emails = {
     const action = args.reference
       ? { label: 'Set up auto-pay', href: `${base}?autopay-setup=${encodeURIComponent(args.reference)}` }
       : { label: 'Manage subscription', href: base };
-    const title = 'Your subscription is active.';
+    const title = 'Your subscription is set.';
     return sendEmail({
       to: [{ email: args.email, name: args.name }],
       subject: `Subscription active · 10X`,
@@ -378,9 +398,8 @@ export const emails = {
             { label: 'Per cycle', value: inr(args.price) },
             { label: 'Next delivery', value: date(args.nextDelivery) },
           ]) +
-          paragraph(
-            'Each box ships pay-on-delivery until you approve auto-pay — a one-time mandate (UPI Autopay, card or bank) so every box after this is charged automatically. Pause or cancel any time from your account.',
-          ),
+          paragraph('Right now, each box is paid for on delivery. Set up auto-pay once and every box after this is paid automatically.') +
+          note('Pause or cancel any time from your account.'),
         action,
       }),
       text: plain(
@@ -389,7 +408,7 @@ export const emails = {
           `Plan: ${args.planName}`,
           `Per cycle: ${inr(args.price)}`,
           `Next delivery: ${date(args.nextDelivery)}`,
-          'Boxes ship pay-on-delivery until you set up auto-pay.',
+          'Right now, each box is paid for on delivery. Set up auto-pay once and every box after this is paid automatically.',
         ],
         action,
       ),
@@ -412,25 +431,25 @@ export const emails = {
     const base = `${env.storefrontUrl}/account/subscriptions`;
     const action = { label: 'Set up auto-pay', href: `${base}?autopay-setup=${encodeURIComponent(args.reference)}` };
     const declineHref = `${base}?autopay-decline=${encodeURIComponent(args.reference)}`;
-    const title = 'Skip paying on every delivery.';
+    const title = 'Skip paying at the door.';
     return sendEmail({
       to: [{ email: args.email, name: args.name }],
       subject: `Set up auto-pay for ${args.planName} · 10X`,
       html: template({
-        preheader: `Approve once — every box after that is charged automatically.`,
+        preheader: 'Set up auto-pay once and every box is paid automatically.',
         label: 'Auto-pay',
         title,
         body:
           paragraph(
-            `Your ${args.planName} plan ships every cycle as pay-on-delivery right now. Approve a one-time mandate (UPI Autopay, card or bank) and each box is charged automatically — no cash at the door, no missed deliveries.`,
+            `Right now you pay for each ${escapeHtml(args.planName)} box when it arrives. Set up auto-pay once — with UPI, a card or your bank — and every box after that is paid for you. Nothing to do at the door.`,
           ) +
           details([
             { label: 'Plan', value: args.planName },
             { label: 'Per cycle', value: inr(args.price) },
             { label: 'Next delivery', value: date(args.nextDelivery) },
           ]) +
-          paragraph(
-            `Prefer to keep paying on delivery? <a href="${declineHref}" style="color:${BRAND.greenDark};font-weight:bold;">Tell us here</a> and we'll stop these reminders. You can switch to auto-pay any time from your account.`,
+          note(
+            `Happy paying on delivery? <a href="${declineHref}" style="color:${BRAND.greenDark};font-weight:bold;">Tell us here</a> and we’ll stop these reminders. You can turn auto-pay on any time from your account.`,
           ),
         action,
       }),
@@ -464,12 +483,12 @@ export const emails = {
       paused: {
         label: 'Subscription paused',
         title: 'Your subscription is paused.',
-        note: 'No deliveries or charges while it is paused.',
+        note: 'Nothing ships and nothing is charged until you resume it.',
       },
       cancelled: {
         label: 'Subscription cancelled',
         title: 'Your subscription is cancelled.',
-        note: 'There will be no further deliveries or charges.',
+        note: 'No more deliveries, no more charges. You can start again any time.',
       },
     }[args.status];
     const action = { label: 'Manage subscriptions', href: `${env.storefrontUrl}/account/subscriptions` };
@@ -492,27 +511,27 @@ export const emails = {
 
   async queryReceived(args: { email: string; name: string; reference: string; message: string }) {
     const action = { label: 'Visit 10X', href: env.storefrontUrl };
-    const title = 'We have your message.';
+    const title = 'We’ve got your message.';
     const message = compactMessage(args.message);
     return sendEmail({
       to: [{ email: args.email, name: args.name }],
       subject: `${args.reference} received · 10X`,
       html: template({
-        preheader: `Your message is logged as ${args.reference}.`,
+        preheader: `We’ll reply within a working day. Reference ${args.reference}.`,
         label: 'Message received',
         title,
-        body: paragraph(`Reference <strong style="color:${BRAND.ink};">${escapeHtml(args.reference)}</strong>. We usually reply within one working day.`) + quote(message),
+        body: paragraph('Thanks for writing. We usually reply within one working day.') + quote(message) + note(`Your reference is ${escapeHtml(args.reference)}.`),
         action,
-        footer: 'Reply to this email to continue the same conversation.',
+        footer: 'Reply to this email and it reaches the same person.',
       }),
-      text: plain(title, [`Reference: ${args.reference}`, 'We usually reply within one working day.', `Your message: ${message}`], action),
+      text: plain(title, ['Thanks for writing. We usually reply within one working day.', `Your message: ${message}`, `Reference: ${args.reference}`], action),
       replyTo: (await getSettings()).store.supportEmail,
     });
   },
 
   async queryAnswered(args: { email: string; name: string; reference: string; reply: string }) {
     const action = { label: 'Visit 10X', href: env.storefrontUrl };
-    const title = 'A reply from 10X.';
+    const title = 'Here’s our reply.';
     return sendEmail({
       to: [{ email: args.email, name: args.name }],
       subject: `Re: ${args.reference} · 10X`,
@@ -520,7 +539,7 @@ export const emails = {
         preheader: `We replied to your message ${args.reference}.`,
         label: 'Support reply',
         title,
-        body: quote(args.reply) + paragraph(`Reference ${escapeHtml(args.reference)}. Reply to this email if you need anything else.`),
+        body: quote(args.reply) + note(`Reference ${escapeHtml(args.reference)}. Reply to this email if there’s anything else.`),
         action,
         footer: 'Reply to this email to continue the conversation.',
       }),
@@ -530,16 +549,16 @@ export const emails = {
   },
 
   async emailChangeCode(args: { email: string; name: string; code: string }) {
-    const title = 'Confirm your new email.';
+    const title = 'Your confirmation code.';
     return sendEmail({
       to: [{ email: args.email, name: args.name }],
       subject: `${args.code} is your 10X code`,
       html: template({
         preheader: `Your 10X confirmation code is ${args.code}.`,
-        label: 'Security code',
+        label: 'Email change',
         title,
-        body: focusValue('Confirmation code', args.code, 'Expires in 15 minutes') + paragraph('If you did not request this change, you can ignore this email.'),
-        footer: 'Never share this code with anyone, including 10X support.',
+        body: focusValue('Enter this code to confirm your new email', args.code, 'It works for 15 minutes') + note('Didn’t ask to change your email? Ignore this and nothing will change.'),
+        footer: 'We will never ask you for this code. Don’t share it with anyone.',
       }),
       text: plain(title, [`Code: ${args.code}`, 'Expires in 15 minutes.', 'If you did not request this change, ignore this email.']),
     });
@@ -547,38 +566,38 @@ export const emails = {
 
   async passwordReset(args: { email: string; name: string; token: string }) {
     const action = { label: 'Choose new password', href: `${env.storefrontUrl}/reset-password?token=${encodeURIComponent(args.token)}` };
-    const title = 'Reset your password.';
+    const title = 'Choose a new password.';
     return sendEmail({
       to: [{ email: args.email, name: args.name }],
       subject: 'Reset your 10X password',
       html: template({
-        preheader: 'Your 10X password reset link is ready.',
+        preheader: 'Here’s your link to set a new 10X password.',
         label: 'Password reset',
         title,
-        body: paragraph('This secure link expires in 60 minutes. If you did not request it, no action is needed.'),
+        body: paragraph('Use the button below to set a new password. The link works for 60 minutes.') + note('Didn’t ask for this? Ignore it — your password stays as it is.'),
         action,
-        footer: 'For your security, this link can be used only to reset your password.',
+        footer: 'This link only lets you set a new password — nothing else.',
       }),
-      text: plain(title, ['This secure link expires in 60 minutes.', 'If you did not request it, no action is needed.'], action),
+      text: plain(title, ['Use the link below to set a new password. It works for 60 minutes.', 'Didn’t ask for this? Ignore it — your password stays as it is.'], action),
     });
   },
 
   async teamInvite(args: { email: string; name: string; tempPassword: string; roleName: string }) {
     const action = { label: 'Open admin panel', href: env.adminUrl };
-    const title = 'Your 10X admin account is ready.';
+    const title = 'You’re on the 10X team.';
     return sendEmail({
       to: [{ email: args.email, name: args.name }],
       subject: 'Your 10X admin account',
       html: template({
-        preheader: `You now have ${args.roleName} access to the 10X admin panel.`,
-        label: 'Team access',
+        preheader: `Your ${args.roleName} login for the 10X admin panel.`,
+        label: 'Admin panel',
         title,
         body: details([
           { label: 'Email', value: args.email },
           { label: 'Role', value: args.roleName },
-        ]) + focusValue('Temporary password', args.tempPassword, 'Change this after your first sign-in'),
+        ]) + focusValue('Temporary password', args.tempPassword, 'Change it the first time you sign in'),
         action,
-        footer: 'This account is for authorized 10X team members only.',
+        footer: 'If you weren’t expecting this, reply and let us know.'
       }),
       text: plain(title, [`Email: ${args.email}`, `Role: ${args.roleName}`, `Temporary password: ${args.tempPassword}`, 'Change it after your first sign-in.'], action),
     });
