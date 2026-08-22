@@ -35,8 +35,13 @@ export const env = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  storefrontUrl: optional('STOREFRONT_URL', 'http://localhost:3000'),
-  adminUrl: optional('ADMIN_URL', 'http://localhost:3010'),
+  storefrontUrl: optional('STOREFRONT_URL', 'http://localhost:3000').replace(/\/+$/, ''),
+  adminUrl: optional('ADMIN_URL', 'http://localhost:3010').replace(/\/+$/, ''),
+  // The address this API is reachable at from the internet. Render sets
+  // RENDER_EXTERNAL_URL automatically; set API_PUBLIC_URL to override it
+  // (a custom domain, or another host). Used to build the webhook URL that
+  // is attached to every Cashfree order and printed at startup.
+  publicApiUrl: (optional('API_PUBLIC_URL') || optional('RENDER_EXTERNAL_URL')).replace(/\/+$/, ''),
 
   s3: {
     region: optional('AWS_S3_REGION', optional('AWS_REGION', 'ap-south-1')),
@@ -83,3 +88,54 @@ export const env = {
   syncKey: optional('SYNC_KEY'),
   syncIntervalSeconds: Number(optional('SYNC_INTERVAL_SECONDS', '60')),
 } as const;
+
+export const CASHFREE_WEBHOOK_PATH = '/api/v1/webhooks/cashfree';
+export const SHIPROCKET_WEBHOOK_PATH = '/api/v1/webhooks/shiprocket';
+
+const isHttps = (url: string): boolean => {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Things that silently break payments in production but are not fatal at
+ * startup. Printed once when the server boots so a misconfigured deploy is
+ * visible in the Render logs instead of in a customer's checkout.
+ */
+export function productionConfigWarnings(): string[] {
+  const warnings: string[] = [];
+  if (!env.isProd) return warnings;
+
+  if (env.cashfree.env !== 'production') {
+    warnings.push('CASHFREE_ENV is not "production" — real customers would be sent to the Cashfree sandbox.');
+  }
+  if (!env.cashfree.appId || !env.cashfree.secretKey) {
+    warnings.push('CASHFREE_APP_ID / CASHFREE_SECRET_KEY are empty — online payment is disabled, COD only.');
+  }
+  if (!isHttps(env.storefrontUrl)) {
+    warnings.push(
+      `STOREFRONT_URL (${env.storefrontUrl}) is not https — Cashfree rejects a non-https return_url, so customers who leave the modal (UPI intent) cannot be brought back to the confirmation page.`,
+    );
+  }
+  if (!env.publicApiUrl) {
+    warnings.push('API_PUBLIC_URL is empty (and RENDER_EXTERNAL_URL not present) — notify_url is not attached to Cashfree orders; webhooks rely on the dashboard setting alone.');
+  } else if (!isHttps(env.publicApiUrl)) {
+    warnings.push(`API_PUBLIC_URL (${env.publicApiUrl}) is not https — Cashfree only delivers webhooks to https endpoints.`);
+  }
+  if (env.corsOrigins.some((o) => /localhost|127\.0\.0\.1/.test(o))) {
+    warnings.push('CORS_ORIGINS still lists a localhost origin — remove it in production.');
+  }
+  if (!env.corsOrigins.includes(env.storefrontUrl)) {
+    warnings.push(`CORS_ORIGINS does not include STOREFRONT_URL (${env.storefrontUrl}) — the storefront cannot call this API from the browser.`);
+  }
+  if (env.jwtSecret.length < 32) {
+    warnings.push('JWT_SECRET is shorter than 32 characters — use a long random value in production.');
+  }
+  if (process.env.ALLOW_TEST_PAYMENTS === 'true') {
+    warnings.push('ALLOW_TEST_PAYMENTS is set — it is ignored in production, but remove it to avoid confusion.');
+  }
+  return warnings;
+}

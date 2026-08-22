@@ -17,6 +17,15 @@ import { logEvent } from '../models/Event';
 
 export const webhooksRouter = Router();
 
+// Pasting the webhook URL into a browser (or a dashboard "verify" ping) gets
+// a plain answer instead of a 404 — the real work is POST-only.
+webhooksRouter.get('/cashfree', (_req, res) => {
+  res.json({ ok: true, message: 'Cashfree webhook endpoint. Cashfree POSTs signed events here.' });
+});
+webhooksRouter.get('/shiprocket', (_req, res) => {
+  res.json({ ok: true, message: 'Shiprocket webhook endpoint. Shiprocket POSTs tracking updates here.' });
+});
+
 /**
  * Cashfree webhook — set the endpoint in the merchant dashboard to
  * POST <api>/api/v1/webhooks/cashfree. Signature is verified against the

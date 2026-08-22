@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { ApiError } from '../utils/ApiError';
-import { env } from '../config/env';
+import { env, CASHFREE_WEBHOOK_PATH } from '../config/env';
 
 // Cashfree Payment Gateway — REST, api-version 2023-08-01. Credentials are
 // Credentials are environment-only and never stored in MongoDB.
@@ -80,7 +80,13 @@ export async function createCashfreeOrder(args: {
       // keys) can't even reach the payment window. Omitting it is safe: the
       // SDK opens in a modal and hands control back to the page, which
       // confirms the payment itself.
-      order_meta: isHttps(args.returnUrl) ? { return_url: args.returnUrl } : {},
+      order_meta: {
+        ...(isHttps(args.returnUrl) ? { return_url: args.returnUrl } : {}),
+        // Per-order webhook address — the dashboard-level webhook still
+        // applies, but this makes payment notifications independent of
+        // whoever last edited the merchant dashboard. Also https-only.
+        ...(isHttps(env.publicApiUrl) ? { notify_url: `${env.publicApiUrl}${CASHFREE_WEBHOOK_PATH}` } : {}),
+      },
     }),
   });
 }
