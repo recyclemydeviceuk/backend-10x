@@ -32,6 +32,14 @@ const autopaySchema = new Schema(
     pendingChargeId: { type: String, default: '' },
     pendingChargeAt: { type: Date, default: null },
     lastChargeStatus: { type: String, default: '' },
+    /**
+     * The nudge loop. Until the mandate is active the customer is reminded
+     * every few days (store setting) to set auto-pay up — unless they have
+     * said "I'll pay on delivery", which stops the reminders for good.
+     */
+    declinedAt: { type: Date, default: null },
+    reminderCount: { type: Number, default: 0 },
+    lastReminderAt: { type: Date, default: null },
   },
   { _id: false },
 );

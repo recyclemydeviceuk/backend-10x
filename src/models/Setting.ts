@@ -17,6 +17,10 @@ const storeSchema = new Schema(
     codEnabled: { type: Boolean, default: true },
     /** Days between subscription deliveries — drives the cadence everywhere. */
     subscriptionIntervalDays: { type: Number, default: 28 },
+    /** Days between auto-pay set-up reminders for subscribers without a mandate. 0 = off. */
+    autopayReminderEveryDays: { type: Number, default: 3 },
+    /** How many reminders before we stop nudging a plan. */
+    autopayReminderMax: { type: Number, default: 5 },
   },
   { _id: false },
 );

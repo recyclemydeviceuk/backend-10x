@@ -22,6 +22,7 @@ import {
 } from './orderLifecycle';
 import { PendingCheckout } from '../models/PendingCheckout';
 import { getAutopayCharge, raiseAutopayCharge } from './cashfreeSubscriptions';
+import { runAutopayReminderSweep } from './autopayReminders';
 import { env } from '../config/env';
 import type { OrderStatus } from '../models/Order';
 
@@ -228,6 +229,13 @@ export async function runSync(force = false): Promise<{ ran: boolean; actions: s
           /* re-checked next sweep */
         }
       }
+    }
+
+    /* ------------------------------------------- auto-pay set-up reminders */
+    try {
+      actions.push(...(await runAutopayReminderSweep(PER_STEP_LIMIT)));
+    } catch (err) {
+      actions.push(`auto-pay reminders: ${err instanceof Error ? err.message : 'error'}`);
     }
 
     /* ------------------------------------------------------------- record */

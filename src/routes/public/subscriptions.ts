@@ -37,6 +37,8 @@ const view = (s: InstanceType<typeof Subscription>, oneTimePrice?: number) => ({
   autopay: {
     status: s.autopay?.status || '',
     authorizedAt: s.autopay?.authorizedAt ?? null,
+    /** True when the customer chose pay-on-delivery — reminders stop. */
+    declined: Boolean(s.autopay?.declinedAt),
   },
   /**
    * What subscribing saves per cycle versus the one-time price. Read from the
@@ -176,6 +178,8 @@ mySubscriptionsRouter.post(
 
     sub.autopay.subscriptionId = created.subscription_id;
     sub.autopay.status = 'initialized';
+    // Starting set-up is a change of mind — reminders can resume if it stalls.
+    sub.autopay.declinedAt = null;
     await sub.save();
 
     res.json({
@@ -224,3 +228,29 @@ export function applyGatewayAutopayStatus(
   else if (status === 'INITIALIZED' || status === 'PENDING' || status === 'BANK_APPROVAL_PENDING') sub.autopay.status = 'initialized';
   else if (status === 'FAILED') sub.autopay.status = 'failed';
 }
+
+/**
+ * "I'll pay on delivery." Stops the auto-pay reminders for this plan; the
+ * customer can still enable auto-pay later from the same page. `undo`
+ * reverses it, so the nudges resume.
+ */
+mySubscriptionsRouter.post(
+  '/subscriptions/:reference/autopay/decline',
+  requireCustomer,
+  validateBody(z.object({ undo: z.boolean().optional() })),
+  asyncHandler(async (req, res) => {
+    const sub = await Subscription.findOne({ reference: req.params.reference, customerId: req.customer!.id });
+    if (!sub) throw ApiError.notFound('Subscription not found.');
+    if (sub.autopay.status === 'active') throw ApiError.badRequest('Auto-pay is already on for this plan.');
+
+    const undo = Boolean((req.body as { undo?: boolean }).undo);
+    sub.autopay.declinedAt = undo ? null : new Date();
+    await sub.save();
+    if (!undo) {
+      await logEvent('subscription', `${sub.reference} will pay on delivery`, sub.customerName, '/subscriptions');
+    }
+
+    const prices = await oneTimePrices([sub]);
+    res.json({ ok: true, subscription: view(sub, prices.get(`${String(sub.productId)}:${sub.tierId}`)) });
+  }),
+);

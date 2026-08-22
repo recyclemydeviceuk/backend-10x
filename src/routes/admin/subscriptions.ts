@@ -10,6 +10,7 @@ import { ApiError } from '../../utils/ApiError';
 import { pageQuery, pageMeta } from '../../utils/paginate';
 import { logEvent } from '../../models/Event';
 import { emails } from '../../services/emails';
+import { sendAutopayReminder } from '../../services/autopayReminders';
 
 export const adminSubscriptionsRouter = Router();
 
@@ -130,5 +131,23 @@ adminSubscriptionsRouter.delete(
     await sub.deleteOne();
     await syncHasSubscription(sub.customerId);
     res.json({ ok: true, message: `${sub.reference} deleted.` });
+  }),
+);
+
+/**
+ * Team-triggered auto-pay nudge. A mandate can only be approved by the
+ * customer in their own bank/UPI app, so "set up auto-pay for them" means
+ * sending them the link — this does that immediately, outside the cadence.
+ * It still respects a customer who chose pay on delivery.
+ */
+adminSubscriptionsRouter.post(
+  '/:id/autopay/remind',
+  requirePermission('subscriptions.edit'),
+  asyncHandler(async (req, res) => {
+    const sub = await Subscription.findById(req.params.id);
+    if (!sub) throw ApiError.notFound('Subscription not found.');
+    const result = await sendAutopayReminder(sub, { force: true });
+    if (!result.sent) throw ApiError.badRequest(result.reason ?? 'Reminder not sent.');
+    res.json({ ok: true, reminders: sub.autopay.reminderCount, lastReminderAt: sub.autopay.lastReminderAt });
   }),
 );

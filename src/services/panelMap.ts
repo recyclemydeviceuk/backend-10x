@@ -466,6 +466,9 @@ function subscriptionOut(s: InstanceType<typeof Subscription>) {
     // Read-only in the panel: the mandate lives with Cashfree.
     autopay: s.autopay?.status || 'off',
     autopayLastCharge: s.autopay?.lastChargeStatus || '',
+    autopayDeclined: Boolean(s.autopay?.declinedAt),
+    autopayReminders: s.autopay?.reminderCount || 0,
+    autopayLastReminderAt: iso(s.autopay?.lastReminderAt ?? null),
   };
 }
 
@@ -901,6 +904,8 @@ async function loadSettings() {
       flatShipping: s.store.flatShipping,
       codEnabled: s.store.codEnabled,
       subscriptionIntervalDays: s.store.subscriptionIntervalDays,
+      autopayReminderEveryDays: s.store.autopayReminderEveryDays,
+      autopayReminderMax: s.store.autopayReminderMax,
     },
     syncing: {
       autoShipments: s.automation.autoShipments,
@@ -934,6 +939,8 @@ async function saveSettings(p: Json): Promise<void> {
     s.store.flatShipping = num(store.flatShipping, s.store.flatShipping);
     s.store.codEnabled = bool(store.codEnabled);
     s.store.subscriptionIntervalDays = num(store.subscriptionIntervalDays, s.store.subscriptionIntervalDays);
+    s.store.autopayReminderEveryDays = num(store.autopayReminderEveryDays, s.store.autopayReminderEveryDays);
+    s.store.autopayReminderMax = num(store.autopayReminderMax, s.store.autopayReminderMax);
   }
   if (p.warehouse) {
     s.warehouse.name = str(warehouse.name);

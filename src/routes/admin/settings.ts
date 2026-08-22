@@ -49,6 +49,39 @@ adminSettingsRouter.get(
 );
 
 /**
+ * Subscription rules: the delivery cadence and the auto-pay nudge loop.
+ * Reminders go out every `autopayReminderEveryDays` (0 switches them off),
+ * at most `autopayReminderMax` per plan, and stop the moment a customer
+ * enables auto-pay or says "I'll pay on delivery".
+ */
+adminSettingsRouter.patch(
+  '/subscriptions',
+  requirePermission('settings.delivery'),
+  validateBody(
+    z.object({
+      subscriptionIntervalDays: z.number().int().min(7).max(90).optional(),
+      autopayReminderEveryDays: z.number().int().min(0).max(30).optional(),
+      autopayReminderMax: z.number().int().min(0).max(20).optional(),
+    }),
+  ),
+  asyncHandler(async (req, res) => {
+    const settings = await getSettings();
+    if (req.body.subscriptionIntervalDays !== undefined) settings.store.subscriptionIntervalDays = req.body.subscriptionIntervalDays;
+    if (req.body.autopayReminderEveryDays !== undefined) settings.store.autopayReminderEveryDays = req.body.autopayReminderEveryDays;
+    if (req.body.autopayReminderMax !== undefined) settings.store.autopayReminderMax = req.body.autopayReminderMax;
+    await settings.save();
+    res.json({
+      ok: true,
+      subscriptions: {
+        subscriptionIntervalDays: settings.store.subscriptionIntervalDays,
+        autopayReminderEveryDays: settings.store.autopayReminderEveryDays,
+        autopayReminderMax: settings.store.autopayReminderMax,
+      },
+    });
+  }),
+);
+
+/**
  * Delivery charges — the one store rule with its own switch. 'free' waives
  * the fee on every order; 'priced' charges the flat fee under the threshold.
  * The checkout reads these on every order, the storefront within seconds.

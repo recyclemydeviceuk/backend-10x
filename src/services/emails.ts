@@ -368,6 +368,57 @@ export const emails = {
     });
   },
 
+  /**
+   * The auto-pay nudge. Two buttons: set it up, or say "pay on delivery" —
+   * both land on the account page, which handles sign-in and the action.
+   */
+  async autopayReminder(args: {
+    email: string;
+    name: string;
+    reference: string;
+    planName: string;
+    price: number;
+    nextDelivery: Date | null;
+    reminderNumber: number;
+  }) {
+    const base = `${env.storefrontUrl}/account/subscriptions`;
+    const action = { label: 'Set up auto-pay', href: `${base}?autopay-setup=${encodeURIComponent(args.reference)}` };
+    const declineHref = `${base}?autopay-decline=${encodeURIComponent(args.reference)}`;
+    const title = 'Skip paying on every delivery.';
+    return sendEmail({
+      to: [{ email: args.email, name: args.name }],
+      subject: `Set up auto-pay for ${args.planName} · 10X`,
+      html: template({
+        preheader: `Approve once — every box after that is charged automatically.`,
+        label: 'Auto-pay',
+        title,
+        body:
+          paragraph(
+            `Your ${args.planName} plan ships every cycle as pay-on-delivery right now. Approve a one-time mandate (UPI Autopay, card or bank) and each box is charged automatically — no cash at the door, no missed deliveries.`,
+          ) +
+          details([
+            { label: 'Plan', value: args.planName },
+            { label: 'Per cycle', value: inr(args.price) },
+            { label: 'Next delivery', value: date(args.nextDelivery) },
+          ]) +
+          paragraph(
+            `Prefer to keep paying on delivery? <a href="${declineHref}" style="color:${BRAND.greenDark};font-weight:bold;">Tell us here</a> and we'll stop these reminders. You can switch to auto-pay any time from your account.`,
+          ),
+        action,
+      }),
+      text: plain(
+        title,
+        [
+          `Plan: ${args.planName}`,
+          `Per cycle: ${inr(args.price)}`,
+          `Next delivery: ${date(args.nextDelivery)}`,
+          `Prefer pay on delivery? ${declineHref}`,
+        ],
+        action,
+      ),
+    });
+  },
+
   async subscriptionUpdated(args: {
     email: string;
     name: string;
