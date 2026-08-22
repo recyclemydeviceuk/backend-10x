@@ -56,7 +56,7 @@ The webhook route is mounted before the JSON parser and the rate limiter, so ret
 
 ### Shiprocket
 
-Settings → API → Webhooks: `POST https://backend-10x.onrender.com/api/v1/webhooks/shiprocket`.
+Settings → Additional Settings → Webhooks: `POST https://backend-10x.onrender.com/api/v1/webhooks/courier`, Auth Token Type `x-api-key`, Token = `SHIPROCKET_WEBHOOK_TOKEN`. (Shiprocket refuses URLs containing the word "shiprocket", so the path says `courier`.)
 
 ### Render notes
 

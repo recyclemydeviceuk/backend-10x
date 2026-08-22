@@ -23,9 +23,11 @@ export const webhooksRouter = Router();
 webhooksRouter.get('/cashfree', (_req, res) => {
   res.json({ ok: true, message: 'Cashfree webhook endpoint. Cashfree POSTs signed events here.' });
 });
-webhooksRouter.get('/shiprocket', (_req, res) => {
-  res.json({ ok: true, message: 'Shiprocket webhook endpoint. Shiprocket POSTs tracking updates here.' });
-});
+const courierHello = (_req: import('express').Request, res: import('express').Response) => {
+  res.json({ ok: true, message: 'Courier tracking webhook endpoint. Shiprocket POSTs tracking updates here.' });
+};
+webhooksRouter.get('/courier', courierHello);
+webhooksRouter.get('/shiprocket', courierHello);
 
 /**
  * Cashfree webhook — set the endpoint in the merchant dashboard to
@@ -163,7 +165,7 @@ webhooksRouter.post(
  * Shiprocket tracking webhook — Settings → API → Webhooks in Shiprocket.
  * Payload carries awb + current_status.
  */
-webhooksRouter.post('/shiprocket', json({ limit: '1mb' }), async (req, res) => {
+const courierWebhook = async (req: import('express').Request, res: import('express').Response) => {
   // Shiprocket sends the token configured in its dashboard as x-api-key.
   // When one is set on the server, anything without it is ignored — without
   // this check anyone who knows an AWB could mark a COD order delivered/paid.
@@ -197,4 +199,10 @@ webhooksRouter.post('/shiprocket', json({ limit: '1mb' }), async (req, res) => {
     console.error('[webhook:shiprocket]', err);
     res.json({ ok: false });
   }
-});
+};
+
+// Shiprocket refuses any webhook URL containing "shiprocket" / "sr" — so the
+// address to paste in their dashboard is /webhooks/courier. The old path stays
+// for anything already pointed at it.
+webhooksRouter.post('/courier', json({ limit: '1mb' }), courierWebhook);
+webhooksRouter.post('/shiprocket', json({ limit: '1mb' }), courierWebhook);

@@ -92,7 +92,8 @@ export const env = {
 } as const;
 
 export const CASHFREE_WEBHOOK_PATH = '/api/v1/webhooks/cashfree';
-export const SHIPROCKET_WEBHOOK_PATH = '/api/v1/webhooks/shiprocket';
+// Shiprocket rejects webhook URLs that contain "shiprocket"/"sr" — hence "courier".
+export const SHIPROCKET_WEBHOOK_PATH = '/api/v1/webhooks/courier';
 
 const isHttps = (url: string): boolean => {
   try {
