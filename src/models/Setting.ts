@@ -46,6 +46,13 @@ const warehouseSchema = new Schema(
 const automationSchema = new Schema(
   {
     autoShipments: { type: Boolean, default: false },
+    /**
+     * Approve return requests automatically (the 7-day window and
+     * one-open-return-per-order rules are already enforced when the customer
+     * files). Receiving and refunding are always automatic once the courier
+     * brings the parcel back.
+     */
+    autoApproveReturns: { type: Boolean, default: true },
     autoTrackingSync: { type: Boolean, default: false },
     autoPaymentSync: { type: Boolean, default: false },
     autoSubscriptionCycles: { type: Boolean, default: false },

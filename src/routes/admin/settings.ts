@@ -24,6 +24,7 @@ adminSettingsRouter.get(
         warehouse: settings.warehouse,
         syncing: {
           autoShipments: settings.automation.autoShipments,
+          autoApproveReturns: settings.automation.autoApproveReturns,
           lastRunAt: settings.automation.lastRunAt,
           log: settings.automation.log.slice(0, 10),
         },
@@ -74,12 +75,16 @@ adminSettingsRouter.patch(
 adminSettingsRouter.patch(
   '/syncing',
   requirePermission('settings.syncing'),
-  validateBody(z.object({ autoShipments: z.boolean() })),
+  validateBody(z.object({ autoShipments: z.boolean().optional(), autoApproveReturns: z.boolean().optional() })),
   asyncHandler(async (req, res) => {
     const settings = await getSettings();
-    settings.automation.autoShipments = req.body.autoShipments;
+    if (req.body.autoShipments !== undefined) settings.automation.autoShipments = req.body.autoShipments;
+    if (req.body.autoApproveReturns !== undefined) settings.automation.autoApproveReturns = req.body.autoApproveReturns;
     await settings.save();
-    res.json({ ok: true, syncing: { autoShipments: settings.automation.autoShipments } });
+    res.json({
+      ok: true,
+      syncing: { autoShipments: settings.automation.autoShipments, autoApproveReturns: settings.automation.autoApproveReturns },
+    });
   }),
 );
 

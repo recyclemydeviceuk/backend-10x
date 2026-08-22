@@ -10,6 +10,10 @@ const srLinkSchema = new Schema(
     awb: { type: String, default: '' },
     courier: { type: String, default: '' },
     scheduledAt: { type: Date, default: null },
+    pickupRequestedAt: { type: Date, default: null },
+    /** Courier's own status string, verbatim. */
+    status: { type: String, default: '' },
+    lastSyncedAt: { type: Date, default: null },
   },
   { _id: false },
 );

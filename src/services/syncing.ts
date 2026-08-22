@@ -24,6 +24,8 @@ import {
 import { PendingCheckout } from '../models/PendingCheckout';
 import { getAutopayCharge, raiseAutopayCharge } from './cashfreeSubscriptions';
 import { runAutopayReminderSweep } from './autopayReminders';
+import { ReturnRequest } from '../models/ReturnRequest';
+import { approveReturn, receiveReturn, refundReturn } from './returnLifecycle';
 import { env } from '../config/env';
 import type { OrderStatus } from '../models/Order';
 
@@ -284,6 +286,93 @@ export async function runSync(force = false): Promise<{ ran: boolean; actions: s
           // Anything else (SCHEDULED / INITIATED / PENDING): keep waiting.
         } catch {
           /* re-checked next sweep */
+        }
+      }
+    }
+
+    /* ---------------------------------------------------------- returns */
+    // The return journey without a human in it: approve (if switched on),
+    // keep asking the courier for a pickup slot, follow the parcel back, and
+    // the moment it is delivered to the warehouse restock and refund.
+    {
+      if (auto.autoApproveReturns) {
+        const requested = await ReturnRequest.find({ status: 'requested' }).limit(PER_STEP_LIMIT);
+        for (const ret of requested) {
+          try {
+            await approveReturn(ret, { by: 'Sync' });
+            actions.push(`${ret.reference} approved automatically${ret.shiprocket.awb ? ` — ${ret.shiprocket.courier} ${ret.shiprocket.awb}` : ''}`);
+          } catch (err) {
+            actions.push(`${ret.reference}: auto-approve failed — ${err instanceof Error ? err.message : 'error'}`);
+          }
+        }
+      }
+
+      if (await isShiprocketConfigured()) {
+        // Booked but no courier / no pickup slot yet — keep trying.
+        const halfBooked = await ReturnRequest.find({
+          status: 'approved',
+          'shiprocket.shipmentId': { $ne: '' },
+          $or: [{ 'shiprocket.awb': '' }, { 'shiprocket.pickupRequestedAt': null }],
+        }).limit(PER_STEP_LIMIT);
+        for (const ret of halfBooked) {
+          try {
+            if (!ret.shiprocket.awb) {
+              const awb = await assignAwb(ret.shiprocket.shipmentId);
+              if (awb.response?.data?.awb_code) {
+                ret.shiprocket.awb = awb.response.data.awb_code;
+                ret.shiprocket.courier = awb.response.data.courier_name ?? '';
+              }
+            }
+            if (ret.shiprocket.awb && !ret.shiprocket.pickupRequestedAt) {
+              await requestPickup(ret.shiprocket.shipmentId);
+              ret.shiprocket.pickupRequestedAt = new Date();
+            }
+            await ret.save();
+          } catch {
+            /* next sweep */
+          }
+        }
+
+        // Follow the parcel home. "DELIVERED" on a return means it reached the
+        // warehouse — restock and refund without anyone clicking.
+        const coming = await ReturnRequest.find({ status: 'approved', 'shiprocket.awb': { $ne: '' } })
+          .sort({ 'shiprocket.lastSyncedAt': 1 })
+          .limit(PER_STEP_LIMIT);
+        for (const ret of coming) {
+          try {
+            const info = await trackAwb(ret.shiprocket.awb);
+            const current = info.tracking_data?.shipment_track?.[0]?.current_status?.toUpperCase() ?? '';
+            ret.shiprocket.lastSyncedAt = new Date();
+            if (current) ret.shiprocket.status = current;
+            await ret.save();
+            if (current === 'DELIVERED') {
+              await receiveReturn(ret, { by: 'Sync' });
+              actions.push(`${ret.reference} back at warehouse — restocked`);
+            }
+          } catch (err) {
+            actions.push(`${ret.reference}: return sync — ${err instanceof Error ? err.message : 'error'}`);
+          }
+        }
+      }
+
+      // Back at the warehouse → money back. Prepaid refunds go through
+      // Cashfree on their own. A cash-on-delivery return has no card to
+      // refund to: the team is told once to pay it out by bank transfer and
+      // records it with the Refund button.
+      const received = await ReturnRequest.find({ status: 'received' }).limit(PER_STEP_LIMIT);
+      for (const ret of received) {
+        try {
+          if (ret.isPrepaid) {
+            const { mode } = await refundReturn(ret, { by: 'Sync' });
+            actions.push(`${ret.reference} refunded automatically (${mode === 'cashfree' ? 'Cashfree' : 'recorded — no gateway link on the order'})`);
+          } else if (!ret.notes.some((n) => n.text.startsWith('Payout needed'))) {
+            ret.notes.push({ by: 'Sync', text: `Payout needed: ₹${ret.amount.toLocaleString('en-IN')} by bank transfer, then press Refund.`, at: new Date() });
+            await ret.save();
+            await logEvent('payment', `${ret.reference}: pay ₹${ret.amount.toLocaleString('en-IN')} back to ${ret.customerName}`, 'Cash-on-delivery return — bank transfer, then press Refund', `/returns/${ret.id}`);
+            actions.push(`${ret.reference} received — COD payout flagged for the team`);
+          }
+        } catch (err) {
+          actions.push(`${ret.reference}: auto-refund failed — ${err instanceof Error ? err.message : 'error'}`);
         }
       }
     }

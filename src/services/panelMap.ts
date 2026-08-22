@@ -928,6 +928,7 @@ async function loadSettings() {
     },
     syncing: {
       autoShipments: s.automation.autoShipments,
+      autoApproveReturns: s.automation.autoApproveReturns,
     },
     warehouse: {
       name: s.warehouse.name,
@@ -969,6 +970,7 @@ async function saveSettings(p: Json): Promise<void> {
   }
   if (p.syncing) {
     s.automation.autoShipments = bool(syncing.autoShipments);
+    if (syncing.autoApproveReturns !== undefined) s.automation.autoApproveReturns = bool(syncing.autoApproveReturns);
   }
   await s.save();
 
