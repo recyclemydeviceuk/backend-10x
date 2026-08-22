@@ -26,7 +26,11 @@ export function discountFor(
  * actually wrong — "add ₹300 more" sends people towards the fix, "invalid
  * coupon" sends them away.
  */
-export async function resolveCoupon(code: string, subtotal: number): Promise<{ coupon: CouponDoc; discount: number }> {
+export async function resolveCoupon(
+  code: string,
+  subtotal: number,
+  customerId?: string,
+): Promise<{ coupon: CouponDoc; discount: number }> {
   const coupon = (await Coupon.findOne({ code: code.trim().toUpperCase() })) as CouponDoc | null;
   if (!coupon || !coupon.active) throw ApiError.badRequest('That code is not valid.');
 
@@ -39,6 +43,17 @@ export async function resolveCoupon(code: string, subtotal: number): Promise<{ c
   if (subtotal < coupon.minOrderValue) {
     const short = coupon.minOrderValue - subtotal;
     throw ApiError.badRequest(`Add ₹${short.toLocaleString('en-IN')} more to use this code.`);
+  }
+  // "Once per customer" and friends: count this customer's live orders
+  // that already used the code.
+  if (coupon.perCustomerLimit != null && customerId) {
+    const { Order } = await import('../models/Order');
+    const used = await Order.countDocuments({ customerId, couponCode: coupon.code, status: { $ne: 'cancelled' } });
+    if (used >= coupon.perCustomerLimit) {
+      throw ApiError.badRequest(
+        coupon.perCustomerLimit === 1 ? 'You have already used this code.' : `This code can be used ${coupon.perCustomerLimit} times per customer.`,
+      );
+    }
   }
 
   return { coupon, discount: discountFor(coupon, subtotal) };

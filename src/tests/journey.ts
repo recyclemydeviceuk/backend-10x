@@ -63,7 +63,9 @@ async function main() {
       },
       ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     });
-    return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
+    const cookie = res.headers.get('set-cookie') ?? '';
+    const session = decodeURIComponent(cookie.match(/10x_customer_session=([^;]+)/)?.[1] ?? '');
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as any, session };
   };
 
   let panelToken = '';
@@ -159,7 +161,7 @@ async function main() {
     method: 'POST',
     body: { name: 'Arjun Mehta', email: 'arjun@example.com', password: 'take-charge-10x', phone: '9876543210' },
   });
-  const token = registered.body.token as string;
+  const token = registered.session;
   check('signing up returns a session', registered.status === 201 && Boolean(token));
 
   const savedAddress = await shop('/auth/me', {
@@ -340,35 +342,21 @@ async function main() {
     panelCustomer,
   );
 
-  // The team packs and ships it, exactly as the panel's action does.
-  const now = new Date().toISOString();
-  const STAGES = ['placed', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
-  const advance = async (to: string, extra: Record<string, unknown> = {}) => {
-    panelOrders = await panelRead('orders');
-    const target = panelOrders.find((o: any) => o.reference === orderRef);
-    const reached = STAGES.indexOf(to);
-    target.status = to;
-    target.timeline = STAGES.map((stage, i) => {
-      const existing = target.timeline.find((e: any) => e.stage === stage);
-      if (i < reached) return existing?.at ? existing : { stage, at: now };
-      if (i === reached) return { stage, at: now };
-      return { stage, at: null };
-    });
-    Object.assign(target, extra);
-    return panelWrite('orders', panelOrders);
-  };
-
-  await advance('shipped', {
-    courier: 'Blue Dart',
-    trackingNumber: 'BD4471902238',
-    shipment: {
-      provider: 'manual',
-      courier: 'Blue Dart',
-      awb: 'BD4471902238',
-      status: 'IN TRANSIT',
-      createdAt: now,
-    },
-  });
+  // The team packs and ships it, exactly as the panel's actions do: manual
+  // tracking goes through the fulfilment route, status through the lifecycle
+  // route. (The bridge no longer moves status — a stale panel tab must never
+  // overwrite what the courier reported.)
+  panelOrders = await panelRead('orders');
+  const targetId = panelOrders.find((o: any) => o.reference === orderRef).id;
+  const adminCall = (path: string, body: unknown, method = 'POST') =>
+    fetch(`${base}/api/v1/admin/orders/${targetId}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${panelToken}` },
+      body: JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, body: (await r.json().catch(() => ({}))) as any }));
+  await adminCall('/manual-tracking', { courier: 'Blue Dart', awb: 'BD4471902238' });
+  await adminCall('/status', { status: 'packed' }, 'PATCH');
+  await adminCall('/status', { status: 'shipped' }, 'PATCH');
 
   const shippedForCustomer = await shop(`/me/orders/${orderRef}`, { token });
   check(
@@ -495,19 +483,13 @@ async function main() {
     panelReturn,
   );
 
-  // The team receives the parcel and pays the refund out.
-  panelReturn.status = 'refunded';
-  panelReturn.refund = { mode: 'manual', at: new Date().toISOString() };
-  panelReturn.resolvedAt = new Date().toISOString();
-  panelReturn.notes = [{ by: 'Founder', at: new Date().toISOString(), text: 'Refunded by bank transfer.' }];
-  await panelWrite('returns', panelReturns);
-
-  panelOrders = await panelRead('orders');
-  const refundedOrder = panelOrders.find((o: any) => o.reference === orderRef);
-  refundedOrder.status = 'returned';
-  refundedOrder.paymentStatus = 'refunded';
-  refundedOrder.payment.refunds = [{ refundId: '', amount: 2347, at: new Date().toISOString(), note: 'Manual payout' }];
-  await panelWrite('orders', panelOrders);
+  // The team pays the refund out — through the refund route, exactly as the
+  // panel's button does. That is what writes the ledger entry on the order
+  // and flips it to returned/refunded; the bridge never touches those.
+  const refundRes = await fetch(`${base}/api/v1/admin/returns/${activeReturn.id}/refund`, { method: 'POST', headers: adminHeaders });
+  check('the refund route accepts a received return', refundRes.status === 200, await refundRes.json().catch(() => ({})));
+  const refundTwice = await fetch(`${base}/api/v1/admin/returns/${activeReturn.id}/refund`, { method: 'POST', headers: adminHeaders });
+  check('a return cannot be refunded twice', refundTwice.status === 400);
 
   const customerReturns = await shop('/me/returns', { token });
   check(

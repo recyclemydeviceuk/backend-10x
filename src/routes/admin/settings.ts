@@ -24,9 +24,6 @@ adminSettingsRouter.get(
         warehouse: settings.warehouse,
         syncing: {
           autoShipments: settings.automation.autoShipments,
-          autoTrackingSync: settings.automation.autoTrackingSync,
-          autoPaymentSync: settings.automation.autoPaymentSync,
-          autoSubscriptionCycles: settings.automation.autoSubscriptionCycles,
           lastRunAt: settings.automation.lastRunAt,
           log: settings.automation.log.slice(0, 10),
         },
@@ -45,6 +42,56 @@ adminSettingsRouter.get(
         },
       },
     });
+  }),
+);
+
+/**
+ * Store identity, support contacts, cash-on-delivery, and the warehouse
+ * Shiprocket picks up from and delivers returns to.
+ */
+adminSettingsRouter.patch(
+  '/store',
+  requirePermission('settings.delivery'),
+  validateBody(
+    z.object({
+      name: z.string().trim().min(1).max(80).optional(),
+      supportEmail: z.string().trim().email().optional(),
+      supportPhone: z.string().trim().max(20).optional(),
+      codEnabled: z.boolean().optional(),
+      warehouse: z
+        .object({
+          name: z.string().trim().max(80).default(''),
+          address: z.string().trim().max(200).default(''),
+          city: z.string().trim().max(60).default(''),
+          state: z.string().trim().max(60).default(''),
+          pincode: z.string().trim().regex(/^\d{6}$|^$/).default(''),
+          phone: z.string().trim().max(20).default(''),
+        })
+        .optional(),
+    }),
+  ),
+  asyncHandler(async (req, res) => {
+    const settings = await getSettings();
+    if (req.body.name !== undefined) settings.store.name = req.body.name;
+    if (req.body.supportEmail !== undefined) settings.store.supportEmail = req.body.supportEmail;
+    if (req.body.supportPhone !== undefined) settings.store.supportPhone = req.body.supportPhone;
+    if (req.body.codEnabled !== undefined) settings.store.codEnabled = req.body.codEnabled;
+    if (req.body.warehouse) Object.assign(settings.warehouse, req.body.warehouse);
+    await settings.save();
+    res.json({ ok: true, store: settings.store, warehouse: settings.warehouse });
+  }),
+);
+
+/** The only syncing switch: auto-book a courier for every paid / COD order. */
+adminSettingsRouter.patch(
+  '/syncing',
+  requirePermission('settings.syncing'),
+  validateBody(z.object({ autoShipments: z.boolean() })),
+  asyncHandler(async (req, res) => {
+    const settings = await getSettings();
+    settings.automation.autoShipments = req.body.autoShipments;
+    await settings.save();
+    res.json({ ok: true, syncing: { autoShipments: settings.automation.autoShipments } });
   }),
 );
 

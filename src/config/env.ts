@@ -76,6 +76,8 @@ export const env = {
     password: optional('SHIPROCKET_PASSWORD'),
     pickupLocation: optional('SHIPROCKET_PICKUP_LOCATION', 'Primary'),
     packageWeightKg: Number(optional('SHIPROCKET_PACKAGE_WEIGHT_KG', optional('SHIPROCKET_PACKAGE_WEIGHT', '0.5'))),
+    /** Shared secret Shiprocket sends in the x-api-key header of tracking webhooks. */
+    webhookToken: optional('SHIPROCKET_WEBHOOK_TOKEN'),
   },
 
   backup: {
@@ -124,6 +126,9 @@ export function productionConfigWarnings(): string[] {
     warnings.push('API_PUBLIC_URL is empty (and RENDER_EXTERNAL_URL not present) — notify_url is not attached to Cashfree orders; webhooks rely on the dashboard setting alone.');
   } else if (!isHttps(env.publicApiUrl)) {
     warnings.push(`API_PUBLIC_URL (${env.publicApiUrl}) is not https — Cashfree only delivers webhooks to https endpoints.`);
+  }
+  if (env.shiprocket.email && !env.shiprocket.webhookToken) {
+    warnings.push('SHIPROCKET_WEBHOOK_TOKEN is empty — tracking webhooks are accepted unsigned; set a token here and in Shiprocket → Settings → API → Webhooks.');
   }
   if (env.corsOrigins.some((o) => /localhost|127\.0\.0\.1/.test(o))) {
     warnings.push('CORS_ORIGINS still lists a localhost origin — remove it in production.');

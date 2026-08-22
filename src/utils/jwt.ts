@@ -1,14 +1,14 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 
-export type CustomerToken = { sub: string; kind: 'customer' };
+export type CustomerToken = { sub: string; kind: 'customer'; v: number };
 export type AdminToken = { sub: string; kind: 'admin' };
 
 const CUSTOMER_TTL = '30d';
 const ADMIN_TTL = '7d';
 
-export function signCustomerToken(customerId: string): string {
-  return jwt.sign({ kind: 'customer' } as object, env.jwtSecret, {
+export function signCustomerToken(customerId: string, sessionVersion = 0): string {
+  return jwt.sign({ kind: 'customer', v: sessionVersion } as object, env.jwtSecret, {
     subject: customerId,
     expiresIn: CUSTOMER_TTL,
   });
@@ -25,7 +25,7 @@ export function verifyCustomerToken(token: string): CustomerToken | null {
   try {
     const payload = jwt.verify(token, env.jwtSecret) as jwt.JwtPayload;
     if (payload.kind !== 'customer' || !payload.sub) return null;
-    return { sub: payload.sub, kind: 'customer' };
+    return { sub: payload.sub, kind: 'customer', v: Number(payload.v ?? 0) };
   } catch {
     return null;
   }

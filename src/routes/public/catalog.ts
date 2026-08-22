@@ -7,6 +7,7 @@ import { discountFor, resolveCoupon } from '../../services/coupons';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { validateBody } from '../../middleware/validate';
 import { ApiError } from '../../utils/ApiError';
+import { optionalCustomer } from '../../middleware/customerAuth';
 
 export const catalogRouter = Router();
 
@@ -117,10 +118,11 @@ catalogRouter.get(
 /* ------------------------------------------------- coupon pre-validation */
 catalogRouter.post(
   '/coupons/validate',
+  optionalCustomer,
   validateBody(z.object({ code: z.string().trim().toUpperCase().min(1), subtotal: z.number().min(0) })),
   asyncHandler(async (req, res) => {
     const { code, subtotal } = req.body;
-    const { coupon, discount } = await resolveCoupon(code, subtotal);
+    const { coupon, discount } = await resolveCoupon(code, subtotal, req.customer?.id);
     res.json({
       ok: true,
       coupon: {

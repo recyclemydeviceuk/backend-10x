@@ -118,7 +118,7 @@ checkoutRouter.post(
     /* ------------------------------------------------------------ coupon */
     let discount = 0;
     if (couponCode) {
-      const resolved = await resolveCoupon(couponCode, subtotal);
+      const resolved = await resolveCoupon(couponCode, subtotal, req.customer!.id);
       discount = resolved.discount;
     }
 

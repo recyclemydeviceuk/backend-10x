@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { FilterQuery } from 'mongoose';
-import { Order, ORDER_STATUSES, type OrderDoc, type OrderStatus } from '../../models/Order';
+import { Order, ORDER_STATUSES, canTransition, type OrderDoc, type OrderStatus } from '../../models/Order';
 import { Customer } from '../../models/Customer';
 import { nextOrderReference, nextInvoiceNumber } from '../../models/Counter';
 import { logEvent } from '../../models/Event';
@@ -28,8 +28,12 @@ import {
   markOrderConfirmedPaid,
   markOrderPaymentFailed,
   refreshCustomerStats,
+  releaseStock,
+  reserveStock,
   stampTimeline,
+  cancelShipmentBooking,
 } from '../../services/orderLifecycle';
+import { getSettings } from '../../models/Setting';
 import { emails } from '../../services/emails';
 
 export const adminOrdersRouter = Router();
@@ -92,10 +96,12 @@ adminOrdersRouter.post(
           }),
         )
         .min(1),
-      shippingFee: z.number().min(0).default(0),
+      /** Omit to price delivery from the store settings like the checkout does. */
+      shippingFee: z.number().min(0).optional(),
       discount: z.number().min(0).default(0),
       paymentMethod: z.enum(['online', 'cod']),
       address: z.object({
+        fullName: z.string().default(''),
         line1: z.string().min(3),
         line2: z.string().default(''),
         city: z.string().min(2),
@@ -109,35 +115,73 @@ adminOrdersRouter.post(
   asyncHandler(async (req, res) => {
     const customer = await Customer.findById(req.body.customerId);
     if (!customer) throw ApiError.badRequest('Pick a customer.');
-    const subtotal = req.body.items.reduce(
-      (s: number, i: { unitPrice: number; quantity: number }) => s + i.unitPrice * i.quantity,
-      0,
-    );
-    const total = subtotal - req.body.discount + req.body.shippingFee;
+
+    // Same rules as the storefront checkout: the catalogue sets the SKU and
+    // pack label, the store settings price delivery, and stock is reserved
+    // so a phone order can't oversell what's on the shelf.
+    const { Product } = await import('../../models/Product');
+    const items: Array<Record<string, unknown>> = [];
+    for (const line of req.body.items as Array<{ productId: string; tierId: string; name: string; tierName: string; quantity: number; unitPrice: number }>) {
+      const product = await Product.findById(line.productId);
+      const tier = product?.tiers.id(line.tierId);
+      if (!product || !tier) throw ApiError.badRequest('One of the packs no longer exists.');
+      if (tier.stock < line.quantity) throw ApiError.badRequest(`${product.name} — ${tier.name}: only ${tier.stock} left in stock.`);
+      items.push({
+        productId: product.id,
+        tierId: tier.id,
+        sku: `${product.slug.toUpperCase()}-${tier.packets}`,
+        name: product.name,
+        tierName: tier.name,
+        packets: `${tier.packets} Stick Packets`,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        subscribe: false,
+      });
+    }
+    const subtotal = items.reduce((s, i) => s + (i.unitPrice as number) * (i.quantity as number), 0);
+    const settings = await getSettings();
+    const shippingFee =
+      req.body.shippingFee !== undefined
+        ? req.body.shippingFee
+        : settings.store.deliveryMode === 'free'
+          ? 0
+          : subtotal - req.body.discount >= settings.store.freeShippingOver
+            ? 0
+            : settings.store.flatShipping;
+    const total = subtotal - req.body.discount + shippingFee;
     const reference = await nextOrderReference();
     const order = await Order.create({
       reference,
       customerId: customer.id,
       customerName: customer.name,
       customerEmail: customer.email,
-      items: req.body.items,
+      items,
       subtotal,
       discount: req.body.discount,
-      shippingFee: req.body.shippingFee,
+      shippingFee,
       total,
       channel: 'website',
       paymentMethod: req.body.paymentMethod,
       paymentStatus: 'pending',
+      payment: { provider: req.body.paymentMethod === 'cod' ? 'cod' : '' },
       status: 'placed',
-      address: req.body.address,
+      address: { ...req.body.address, fullName: req.body.address.fullName || customer.name },
       timeline: [{ stage: 'placed', at: new Date() }],
-      notes: req.body.note
-        ? [{ by: req.admin!.name, text: req.body.note, at: new Date() }]
-        : [],
+      notes: [
+        { by: req.admin!.name, text: `Manual order created${req.body.note ? ` — ${req.body.note}` : ''}.`, at: new Date() },
+      ],
       placedAt: new Date(),
     });
+    try {
+      await reserveStock(order);
+    } catch (error) {
+      await order.deleteOne();
+      throw error;
+    }
     await refreshCustomerStats(customer._id);
     await logEvent('order', `Manual order ${reference}`, `by ${req.admin!.name}`, `/orders/${order.id}`);
+    // A cash order is real right away — confirm it so it ships like any other.
+    if (order.paymentMethod === 'cod') await markOrderConfirmedPaid(order);
     res.status(201).json({ ok: true, order });
   }),
 );
@@ -150,6 +194,13 @@ adminOrdersRouter.patch(
   asyncHandler(async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) throw ApiError.notFound('Order not found.');
+    if (order.status === req.body.status) return res.json({ ok: true, order });
+    if (!canTransition(order.status, req.body.status)) {
+      throw ApiError.badRequest(`An order that is ${order.status.replace(/_/g, ' ')} can't be marked ${req.body.status.replace(/_/g, ' ')}.`);
+    }
+    if (req.body.status === 'confirmed' && order.paymentMethod === 'online' && order.paymentStatus !== 'paid') {
+      throw ApiError.badRequest('An online order is confirmed by its payment, not by hand.');
+    }
     order.notes.push({ by: req.admin!.name, text: `Status set to ${req.body.status}.`, at: new Date() });
     await applyStatusChange(order, req.body.status);
     // Cancellation sends the money back on its own — same rule as when the
@@ -245,6 +296,12 @@ adminOrdersRouter.delete(
   asyncHandler(async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) throw ApiError.notFound('Order not found.');
+    // Deleting is not forgetting: a courier booking is stopped and reserved
+    // stock goes back, otherwise the parcel ships and the shelf stays short.
+    if (!['delivered', 'returned', 'cancelled'].includes(order.status)) {
+      await cancelShipmentBooking(order);
+      if (order.stockAllocated && !order.stockReleased) await releaseStock(order);
+    }
     await order.deleteOne();
     await refreshCustomerStats(order.customerId);
     res.json({ ok: true, message: `${order.reference} deleted.` });
@@ -259,13 +316,37 @@ adminOrdersRouter.post(
     const order = await Order.findById(req.params.id);
     if (!order) throw ApiError.notFound('Order not found.');
     if (order.shipment.shipmentId) throw ApiError.conflict('A shipment already exists for this order.');
+    if (order.status === 'cancelled' || order.status === 'returned') throw ApiError.badRequest('This order is closed.');
+    if (order.paymentMethod === 'online' && order.paymentStatus !== 'paid') throw ApiError.badRequest('Wait for the payment to clear before shipping.');
     const created = await createShiprocketOrder(order);
     order.shipment.provider = 'shiprocket';
     order.shipment.orderId = String(created.order_id);
     order.shipment.shipmentId = String(created.shipment_id);
     order.shipment.createdAt = new Date();
+    order.shipment.holdAutoBook = false;
     order.notes.push({ by: req.admin!.name, text: 'Shiprocket shipment created.', at: new Date() });
-    if (order.status === 'confirmed') {
+    // One click does the whole booking: courier assigned and pickup
+    // requested. Either step may lag at Shiprocket — then the buttons for
+    // that step stay available on the order page.
+    try {
+      const awb = await assignAwb(String(created.shipment_id));
+      const data = awb.response?.data;
+      if (data?.awb_code) {
+        order.shipment.awb = data.awb_code;
+        order.shipment.courier = data.courier_name ?? '';
+        order.trackingNumber = data.awb_code;
+        order.courier = data.courier_name ?? '';
+        try {
+          await requestPickup(String(created.shipment_id));
+          order.shipment.pickupRequestedAt = new Date();
+        } catch {
+          order.notes.push({ by: 'Sync', text: 'Pickup not scheduled yet — request it from the order page.', at: new Date() });
+        }
+      }
+    } catch {
+      order.notes.push({ by: 'Sync', text: 'Courier not assigned yet — assign the AWB from the order page.', at: new Date() });
+    }
+    if (order.status === 'confirmed' || order.status === 'placed') {
       order.status = 'packed';
       stampTimeline(order, 'packed');
     }
@@ -287,6 +368,12 @@ adminOrdersRouter.post(
     order.shipment.courier = data.courier_name ?? '';
     order.trackingNumber = data.awb_code;
     order.courier = data.courier_name ?? '';
+    try {
+      await requestPickup(order.shipment.shipmentId);
+      order.shipment.pickupRequestedAt = new Date();
+    } catch {
+      /* the pickup button stays available */
+    }
     await order.save();
     res.json({ ok: true, order });
   }),
@@ -362,6 +449,9 @@ adminOrdersRouter.post(
   asyncHandler(async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order?.shipment.orderId) throw ApiError.badRequest('No shipment to cancel.');
+    if (['shipped', 'out_for_delivery', 'delivered'].includes(order.status)) {
+      throw ApiError.badRequest('The courier already has this parcel — it can no longer be cancelled here.');
+    }
     await cancelShiprocketOrder(order.shipment.orderId);
     order.shipment = {
       provider: '',
@@ -375,6 +465,9 @@ adminOrdersRouter.post(
       labelUrl: '',
       invoiceUrl: '',
       lastSyncedAt: null,
+      // The team took this booking down on purpose — don't rebook it behind
+      // their back. "Create shipment" lifts the hold.
+      holdAutoBook: true,
     };
     order.courier = '';
     order.trackingNumber = '';
@@ -399,21 +492,6 @@ adminOrdersRouter.post(
     order.shipment.courier = req.body.courier;
     order.notes.push({ by: req.admin!.name, text: `Manual tracking: ${req.body.courier} ${req.body.awb}.`, at: new Date() });
     await order.save();
-    res.json({ ok: true, order });
-  }),
-);
-
-/* ------------------------------------------------------------ invoice data */
-adminOrdersRouter.get(
-  '/:id/invoice',
-  requirePermission('orders.invoice'),
-  asyncHandler(async (req, res) => {
-    const order = await Order.findById(req.params.id);
-    if (!order) throw ApiError.notFound('Order not found.');
-    if (!order.invoiceNo) {
-      order.invoiceNo = await nextInvoiceNumber();
-      await order.save();
-    }
     res.json({ ok: true, order });
   }),
 );

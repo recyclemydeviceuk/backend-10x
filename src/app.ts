@@ -55,6 +55,20 @@ export function createApp(): express.Express {
   );
   app.use(morgan(env.isProd ? 'combined' : 'dev'));
 
+  // Cross-site request forgery guard for cookie sessions. Production cookies
+  // are SameSite=None (the storefront and API are different origins), so a
+  // form on another site could post with the customer's cookie. JSON calls
+  // are stopped by the CORS preflight; multipart and bodiless POSTs are
+  // not — so every state-changing request must come from one of our origins.
+  // Webhooks and server-to-server calls carry no Origin and pass.
+  app.use((req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+    const origin = req.headers.origin;
+    if (!origin) return next();
+    if (env.corsOrigins.includes(origin)) return next();
+    return res.status(403).json({ ok: false, message: 'Cross-site request refused.' });
+  });
+
   // Webhooks first — the Cashfree route needs the RAW body for signatures.
   app.use('/api/v1/webhooks', webhooksRouter);
 

@@ -1,4 +1,4 @@
-import { Order } from '../models/Order';
+import { Order, canTransition } from '../models/Order';
 import { Subscription } from '../models/Subscription';
 import { Customer } from '../models/Customer';
 import { getSettings } from '../models/Setting';
@@ -8,6 +8,7 @@ import {
   isShiprocketConfigured,
   createShiprocketOrder,
   assignAwb,
+  requestPickup,
   trackAwb,
   TRACK_TO_STATUS,
 } from './shiprocket';
@@ -45,10 +46,15 @@ export async function runSync(force = false): Promise<{ ran: boolean; actions: s
   const actions: string[] = [];
   try {
     /* ---------------------------------------------- auto-book shipments */
-    if (await isShiprocketConfigured()) {
+    // The ONE step behind a switch: booking a courier costs money, so the
+    // team decides whether a paid order books itself or waits for "Create
+    // shipment" on the order page. Tracking, payments and subscription cycles
+    // below are always on — nothing in the panel should need a sync button.
+    if (auto.autoShipments && (await isShiprocketConfigured())) {
       const candidates = await Order.find({
         status: { $in: ['confirmed', 'packed'] },
         'shipment.shipmentId': '',
+        'shipment.holdAutoBook': { $ne: true },
         // Prepaid orders must be settled. Confirmed COD orders are collected
         // by the courier, so they must also reach Shiprocket.
         $or: [
@@ -57,10 +63,20 @@ export async function runSync(force = false): Promise<{ ran: boolean; actions: s
         ],
       }).limit(PER_STEP_LIMIT);
       for (const order of candidates) {
+        // Claim the order BEFORE calling Shiprocket, so a save that fails
+        // afterwards (or a second worker) can never book the same parcel
+        // twice. A failed booking releases the claim.
+        const claim = await Order.updateOne(
+          { _id: order._id, 'shipment.shipmentId': '' },
+          { $set: { 'shipment.shipmentId': 'booking', 'shipment.provider': 'shiprocket' } },
+        );
+        if (claim.modifiedCount === 0) continue;
         try {
           const created = await createShiprocketOrder(order);
+          order.shipment.provider = 'shiprocket';
           order.shipment.orderId = String(created.order_id);
           order.shipment.shipmentId = String(created.shipment_id);
+          order.shipment.createdAt = new Date();
           const awb = await assignAwb(String(created.shipment_id)).catch(() => null);
           const data = awb?.response?.data;
           if (data?.awb_code) {
@@ -68,6 +84,13 @@ export async function runSync(force = false): Promise<{ ran: boolean; actions: s
             order.shipment.courier = data.courier_name ?? '';
             order.trackingNumber = data.awb_code;
             order.courier = data.courier_name ?? '';
+            // The courier is assigned — ask them to come and collect it too.
+            try {
+              await requestPickup(String(created.shipment_id));
+              order.shipment.pickupRequestedAt = new Date();
+            } catch {
+              /* retried below on the next sweep */
+            }
           }
           order.notes.push({ by: 'Sync', text: 'Shipment booked automatically.', at: new Date() });
           if (order.status === 'confirmed') {
@@ -77,26 +100,60 @@ export async function runSync(force = false): Promise<{ ran: boolean; actions: s
           await order.save();
           actions.push(`Booked shipment for ${order.reference}`);
         } catch (err) {
+          await Order.updateOne(
+            { _id: order._id, 'shipment.shipmentId': 'booking' },
+            { $set: { 'shipment.shipmentId': '', 'shipment.provider': '' } },
+          );
           actions.push(`${order.reference}: shipment failed — ${err instanceof Error ? err.message : 'error'}`);
+        }
+      }
+
+      // Bookings that got a courier but no pickup slot (Shiprocket hiccup):
+      // keep asking until the pickup is scheduled, so nothing sits in the
+      // warehouse waiting for a click.
+      const noPickup = await Order.find({
+        'shipment.provider': 'shiprocket',
+        'shipment.awb': { $ne: '' },
+        'shipment.pickupRequestedAt': null,
+        status: { $in: ['packed'] },
+      }).limit(PER_STEP_LIMIT);
+      for (const order of noPickup) {
+        try {
+          await requestPickup(order.shipment.shipmentId);
+          order.shipment.pickupRequestedAt = new Date();
+          await order.save();
+          actions.push(`${order.reference}: pickup scheduled`);
+        } catch {
+          /* next sweep */
         }
       }
     }
 
     /* ------------------------------------------------- tracking -> status */
     if (await isShiprocketConfigured()) {
+      // Least-recently-checked first, and every check is stamped — so with
+      // more parcels in flight than one sweep covers, each still gets its
+      // turn and the order page shows when it was last looked at.
       const tracked = await Order.find({
+        'shipment.provider': 'shiprocket',
         'shipment.awb': { $ne: '' },
         status: { $in: ['packed', 'shipped', 'out_for_delivery'] },
-      }).limit(PER_STEP_LIMIT);
+      })
+        .sort({ 'shipment.lastSyncedAt': 1 })
+        .limit(PER_STEP_LIMIT);
       for (const order of tracked) {
         try {
           const info = await trackAwb(order.shipment.awb);
           const current = info.tracking_data?.shipment_track?.[0]?.current_status?.toUpperCase() ?? '';
+          order.shipment.lastSyncedAt = new Date();
+          if (current) order.shipment.status = current;
           const mapped = TRACK_TO_STATUS[current] as OrderStatus | undefined;
-          if (mapped && mapped !== order.status) {
+          if (mapped && mapped !== order.status && canTransition(order.status, mapped)) {
             order.notes.push({ by: 'Sync', text: `Courier update: ${current}.`, at: new Date() });
             await applyStatusChange(order, mapped);
             actions.push(`${order.reference} → ${mapped}`);
+          } else {
+            await order.save();
           }
         } catch {
           /* transient tracking errors are fine */

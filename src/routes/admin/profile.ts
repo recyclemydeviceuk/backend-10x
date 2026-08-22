@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { requireAdminPermission } from '../../middleware/adminPermission';
 import { requireAdmin } from '../../middleware/adminAuth';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { validateBody } from '../../middleware/validate';
@@ -43,7 +42,7 @@ const profileView = async (adminId: string) => {
   };
 };
 
-adminProfileRouter.get('/', requireAdminPermission('settings.view'), asyncHandler(async (_req, res) => {
+adminProfileRouter.get('/', requireAdmin, asyncHandler(async (_req, res) => {
   res.json({ ok: true, profile: await profileView(_req.admin!.id) });
 }));
 
@@ -78,7 +77,7 @@ adminProfileRouter.post(
 
 adminProfileRouter.patch(
   '/',
-  requireAdminPermission('settings.view'),
+  requireAdmin,
   validateBody(z.object({
     name: z.string().trim().min(2).max(80).optional(),
     email: z.string().trim().toLowerCase().email().optional(),
@@ -117,7 +116,7 @@ const photo = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 
 
 adminProfileRouter.post(
   '/photo',
-  requireAdminPermission('settings.view'),
+  requireAdmin,
   photo.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw ApiError.badRequest('Choose a profile photo.');
@@ -130,7 +129,7 @@ adminProfileRouter.post(
   }),
 );
 
-adminProfileRouter.delete('/photo', requireAdminPermission('settings.view'), asyncHandler(async (req, res) => {
+adminProfileRouter.delete('/photo', requireAdmin, asyncHandler(async (req, res) => {
   const profile = await editableProfile(req.admin!.id);
   const previous = profile.avatarUrl;
   profile.avatarUrl = '';

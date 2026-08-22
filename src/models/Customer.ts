@@ -58,6 +58,8 @@ const customerSchema = new Schema(
     avatarUrl: { type: String, default: '' },
     /** Empty for admin-created customers who never set a password. */
     passwordHash: { type: String, default: '' },
+    /** Bumped on password reset — every token issued before it stops working. */
+    sessionVersion: { type: Number, default: 0 },
     addresses: { type: [addressSchema], default: [] },
     city: { type: String, default: '' },
     state: { type: String, default: '' },

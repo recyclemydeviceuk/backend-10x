@@ -52,7 +52,11 @@ async function main() {
   };
   const api = async (path: string, init?: RequestInit) => {
     const res = await fetch(`${base}${path}`, init);
-    return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
+    // The customer session is an HttpOnly cookie (never echoed in JSON);
+    // surface it so the test can act as that customer.
+    const cookie = res.headers.get('set-cookie') ?? '';
+    const session = cookie.match(/10x_customer_session=([^;]+)/)?.[1] ?? '';
+    return { status: res.status, body: (await res.json().catch(() => ({}))) as any, session: decodeURIComponent(session) };
   };
   const json = (body: unknown, token?: string): RequestInit => ({
     method: 'POST',
@@ -210,8 +214,8 @@ async function main() {
     '/api/v1/auth/register',
     json({ name: 'Asha Rao', email: 'asha@example.com', password: 'password123' }),
   );
-  check('customer register', reg.status === 201 && Boolean(reg.body.token));
-  const customerToken = reg.body.token as string;
+  check('customer register', reg.status === 201 && Boolean(reg.session) && !reg.body.token);
+  const customerToken = reg.session;
 
   const checkout = await api(
     '/api/v1/checkout',
@@ -351,10 +355,13 @@ async function main() {
   const afterEdit = await api(`/api/v1/admin/orders/${panelOrder.id}`, {
     headers: { authorization: `Bearer ${adminToken}` },
   });
+  // Notes are the one thing the panel edits in place; status (and payment,
+  // shipment, stock) belong to the lifecycle routes and must NOT move through
+  // the bridge, or a stale panel tab could rewrite what the courier reported.
   check(
-    'bridge writes a panel order edit back',
+    'bridge writes a panel order note back, and leaves status to the lifecycle',
     putOrders.status === 200 &&
-      afterEdit.body.order?.status === 'packed' &&
+      afterEdit.body.order?.status === beforeEdit.body.order?.status &&
       afterEdit.body.order?.notes?.some((n: any) => n.text === 'Packed by hand.'),
     JSON.stringify(afterEdit.body.order ?? {}).slice(0, 300),
   );
@@ -486,7 +493,9 @@ async function main() {
   // B ships the order while A is still looking at the old copy.
   await bridgePut(
     'orders',
-    roundB.body.data.map((o: any) => (o.id === panelOrder.id ? { ...o, courier: 'Blue Dart' } : o)),
+    roundB.body.data.map((o: any) =>
+      o.id === panelOrder.id ? { ...o, notes: [...(o.notes ?? []), { by: 'B', at: new Date().toISOString(), text: 'Blue Dart' }] } : o,
+    ),
     idsOf(roundB.body.data),
   );
 
@@ -508,8 +517,8 @@ async function main() {
   const afterStale = await bridgeGet('orders');
   check(
     'the colleague’s edit survives',
-    afterStale.body.data.find((o: any) => o.id === panelOrder.id)?.courier === 'Blue Dart',
-    afterStale.body.data.find((o: any) => o.id === panelOrder.id)?.courier,
+    afterStale.body.data.find((o: any) => o.id === panelOrder.id)?.notes?.some((n: any) => n.text === 'Blue Dart') === true,
+    JSON.stringify(afterStale.body.data.find((o: any) => o.id === panelOrder.id)?.notes ?? []),
   );
 
   // --- deletion scoping: a record created after someone's read must survive

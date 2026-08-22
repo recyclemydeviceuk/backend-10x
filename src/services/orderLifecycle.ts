@@ -163,6 +163,7 @@ async function activateSubscriptions(order: OrderModel): Promise<void> {
         await emails.subscriptionStarted({
           email: customer.email,
           name: customer.name,
+          reference: subscription.reference,
           planName: subscription.planName,
           price: line.unitPrice * line.quantity,
           nextDelivery,
@@ -413,7 +414,7 @@ export async function markPendingCheckoutFailed(
  * team cancels it by hand. Dynamic import keeps shiprocket out of this
  * module's import graph (same pattern as the Cashfree refund below).
  */
-async function cancelShipmentBooking(order: OrderModel): Promise<void> {
+export async function cancelShipmentBooking(order: OrderModel): Promise<void> {
   const srOrderId = order.shipment?.orderId;
   const alreadyDown = /cancel/i.test(order.shipment?.status ?? '');
   if (!srOrderId || order.shipment?.provider !== 'shiprocket' || alreadyDown) return;

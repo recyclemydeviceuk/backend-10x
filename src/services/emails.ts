@@ -347,8 +347,23 @@ export const emails = {
     });
   },
 
-  async subscriptionStarted(args: { email: string; name: string; planName: string; price: number; nextDelivery: Date | null }) {
-    const action = { label: 'Manage subscription', href: `${env.storefrontUrl}/account/subscriptions` };
+  /**
+   * Sent the moment a plan is created. The primary button is auto-pay set-up
+   * (the first, strongest nudge — the card is still out); the reminder loop
+   * takes over from there if they don't.
+   */
+  async subscriptionStarted(args: {
+    email: string;
+    name: string;
+    reference?: string;
+    planName: string;
+    price: number;
+    nextDelivery: Date | null;
+  }) {
+    const base = `${env.storefrontUrl}/account/subscriptions`;
+    const action = args.reference
+      ? { label: 'Set up auto-pay', href: `${base}?autopay-setup=${encodeURIComponent(args.reference)}` }
+      : { label: 'Manage subscription', href: base };
     const title = 'Your subscription is active.';
     return sendEmail({
       to: [{ email: args.email, name: args.name }],
@@ -357,14 +372,27 @@ export const emails = {
         preheader: `${args.planName} is now active.`,
         label: 'Subscription active',
         title,
-        body: details([
-          { label: 'Plan', value: args.planName },
-          { label: 'Per cycle', value: inr(args.price) },
-          { label: 'Next delivery', value: date(args.nextDelivery) },
-        ]) + paragraph('Pause or cancel any time from your account.'),
+        body:
+          details([
+            { label: 'Plan', value: args.planName },
+            { label: 'Per cycle', value: inr(args.price) },
+            { label: 'Next delivery', value: date(args.nextDelivery) },
+          ]) +
+          paragraph(
+            'Each box ships pay-on-delivery until you approve auto-pay — a one-time mandate (UPI Autopay, card or bank) so every box after this is charged automatically. Pause or cancel any time from your account.',
+          ),
         action,
       }),
-      text: plain(title, [`Plan: ${args.planName}`, `Per cycle: ${inr(args.price)}`, `Next delivery: ${date(args.nextDelivery)}`], action),
+      text: plain(
+        title,
+        [
+          `Plan: ${args.planName}`,
+          `Per cycle: ${inr(args.price)}`,
+          `Next delivery: ${date(args.nextDelivery)}`,
+          'Boxes ship pay-on-delivery until you set up auto-pay.',
+        ],
+        action,
+      ),
     });
   },
 

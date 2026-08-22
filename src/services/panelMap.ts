@@ -121,6 +121,7 @@ function orderOut(o: InstanceType<typeof Order>) {
       productId: str(i.productId),
       tierId: i.tierId,
       tierName: i.tierName || '',
+      subscribe: Boolean(i.subscribe),
     })),
     subtotal: o.subtotal,
     shipping: o.shippingFee,
@@ -197,6 +198,7 @@ function orderIn(p: Json): Json {
       packets: str(i.packets),
       quantity: num(i.quantity, 1),
       unitPrice: num(i.price),
+      subscribe: bool(i.subscribe),
     })),
     subtotal: num(p.subtotal),
     discount: num(p.discount),
@@ -669,6 +671,13 @@ async function reconcile<M extends { updateOne: Function; create: Function; dele
   map: (p: Json) => Json,
   onInsert?: (doc: Json, panel: Json) => Promise<Json>,
   knownIds?: string[],
+  /**
+   * Narrower mapping for records that already exist. Where the panel only
+   * ever edits a few fields (orders: notes), writing the whole document back
+   * would overwrite what the server changed in the meantime — and bake
+   * display fallbacks into the database.
+   */
+  updateMap?: (p: Json) => Json,
 ): Promise<void> {
   const seen: Types.ObjectId[] = [];
   const existingIds = new Set(
@@ -694,11 +703,11 @@ async function reconcile<M extends { updateOne: Function; create: Function; dele
 
   for (const panel of incoming) {
     const id = str(panel.id);
-    const mapped = map(panel);
     if (isOid(id) && existingIds.has(id)) {
       seen.push(new Types.ObjectId(id));
-      await (model.updateOne as Function)({ _id: id }, { $set: mapped });
+      await (model.updateOne as Function)({ _id: id }, { $set: (updateMap ?? map)(panel) });
     } else {
+      const mapped = map(panel);
       const _id = asOid(id);
       seen.push(_id);
       const doc = onInsert ? await onInsert({ ...mapped, _id }, panel) : { ...mapped, _id };
@@ -825,15 +834,25 @@ export async function saveCollection(
 
   switch (name) {
     case 'orders':
-      return reconcile(Order, rows, orderIn, async (doc) => {
-        // The panel mints its own reference from what it can see; the counter
-        // is the real authority, so a collision gets a fresh one rather than
-        // failing the write.
-        if (!doc.reference || (await Order.exists({ reference: doc.reference }))) {
-          doc.reference = await nextOrderReference();
-        }
-        return doc;
-      }, knownIds);
+      return reconcile(
+        Order,
+        rows,
+        orderIn,
+        async (doc) => {
+          // The panel mints its own reference from what it can see; the counter
+          // is the real authority, so a collision gets a fresh one rather than
+          // failing the write.
+          if (!doc.reference || (await Order.exists({ reference: doc.reference }))) {
+            doc.reference = await nextOrderReference();
+          }
+          return doc;
+        },
+        knownIds,
+        // Existing orders: status, payment, shipment, stock and timeline are
+        // all owned by the server's lifecycle routes. Notes are the one thing
+        // the panel edits in place.
+        (p) => ({ notes: notesIn(p.notes) }),
+      );
     case 'customers':
       return reconcile(Customer, rows, customerIn, undefined, knownIds);
     case 'products':
@@ -909,8 +928,6 @@ async function loadSettings() {
     },
     syncing: {
       autoShipments: s.automation.autoShipments,
-      autoTrackingSync: s.automation.autoTrackingSync,
-      autoPaymentSync: s.automation.autoPaymentSync,
     },
     warehouse: {
       name: s.warehouse.name,
@@ -952,8 +969,6 @@ async function saveSettings(p: Json): Promise<void> {
   }
   if (p.syncing) {
     s.automation.autoShipments = bool(syncing.autoShipments);
-    s.automation.autoTrackingSync = bool(syncing.autoTrackingSync);
-    s.automation.autoPaymentSync = bool(syncing.autoPaymentSync);
   }
   await s.save();
 

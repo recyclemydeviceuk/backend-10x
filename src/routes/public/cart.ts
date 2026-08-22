@@ -28,9 +28,34 @@ const lineSchema = z.object({
   stock: z.number().int().min(0).optional(),
 }).nullable();
 
+type Line = NonNullable<z.infer<typeof lineSchema>>;
+
+/**
+ * The catalogue is the only source of prices and stock. Whatever the browser
+ * sent (or whatever was true when the line was added) is replaced with the
+ * live figures, so the cart and the "Pay ₹X" button always show what the
+ * checkout will actually charge. A pack that has since vanished empties the line.
+ */
+async function repriced(line: Line | null): Promise<Line | null> {
+  if (!line) return null;
+  const { Product } = await import('../../models/Product');
+  const product = await Product.findOne({ _id: line.productId, status: 'active' });
+  const tier = product?.tiers.id(line.tierId);
+  if (!product || !tier || !tier.available) return null;
+  return {
+    ...line,
+    productName: product.name,
+    tierName: tier.name,
+    price: line.isSubscription ? tier.subscribePrice : tier.oneTimePrice,
+    oneTimePrice: tier.oneTimePrice,
+    stock: tier.stock,
+    quantity: Math.min(line.quantity, Math.max(tier.stock, 1)),
+  };
+}
+
 cartRouter.get('/cart', asyncHandler(async (req, res) => {
   const cart = await cartForRequest(req, res, customerId(req));
-  res.json({ ok: true, cart: { line: cart?.line ?? null, couponCode: cart?.couponCode ?? '' } });
+  res.json({ ok: true, cart: { line: await repriced(cart?.line ?? null), couponCode: cart?.couponCode ?? '' } });
 }));
 
 cartRouter.put(
@@ -43,7 +68,7 @@ cartRouter.put(
       {
         $set: {
           customerId: customerId(req),
-          line: req.body.line,
+          line: await repriced(req.body.line),
           couponCode: req.body.couponCode,
           expiresAt: new Date(Date.now() + CART_EXPIRES_MS),
         },

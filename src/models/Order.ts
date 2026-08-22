@@ -1,5 +1,26 @@
 import { Schema, model, type InferSchemaType } from 'mongoose';
 
+/**
+ * Which moves the order may make. Forward along the happy path, cancel
+ * before the courier has it, return only after delivery. Anything else is
+ * refused so history can never be rewritten (delivered → placed) and goods
+ * are never restocked after they've actually been delivered.
+ */
+export const STATUS_TRANSITIONS: Record<string, readonly string[]> = {
+  placed: ['confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'],
+  confirmed: ['packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'],
+  packed: ['shipped', 'out_for_delivery', 'delivered', 'cancelled'],
+  shipped: ['out_for_delivery', 'delivered', 'cancelled', 'returned'],
+  out_for_delivery: ['delivered', 'cancelled', 'returned'],
+  delivered: ['returned'],
+  cancelled: [],
+  returned: [],
+};
+
+export function canTransition(from: string, to: string): boolean {
+  return from === to || (STATUS_TRANSITIONS[from] ?? []).includes(to);
+}
+
 export const ORDER_STATUSES = [
   'placed',
   'confirmed',
@@ -98,6 +119,11 @@ const shipmentSchema = new Schema(
     labelUrl: { type: String, default: '' },
     invoiceUrl: { type: String, default: '' },
     lastSyncedAt: { type: Date, default: null },
+    /**
+     * Set when the team cancels a booking by hand. The worker will not book
+     * this order again on its own; "Create shipment" clears it.
+     */
+    holdAutoBook: { type: Boolean, default: false },
   },
   { _id: false },
 );

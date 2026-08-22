@@ -8,6 +8,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { validateBody } from '../../middleware/validate';
 import { requireCustomer } from '../../middleware/customerAuth';
 import { ApiError } from '../../utils/ApiError';
+import { clearCartForRequest } from '../../services/cartSession';
 import { logEvent } from '../../models/Event';
 import { emails } from '../../services/emails';
 import multer from 'multer';
@@ -17,7 +18,24 @@ import { claimCartForCustomer } from '../../services/cartSession';
 
 export const authRouter = Router();
 
-const authLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
+// JSON, not express-rate-limit's plain text, so the storefront can show it.
+const limiterReply = (message: string) => ({
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req: import('express').Request, res: import('express').Response) => res.status(429).json({ ok: false, message }),
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 30,
+  ...limiterReply('Too many sign-in attempts from this connection — wait 15 minutes and try again.'),
+});
+// Password reset and email change count separately, so a burst of bad
+// logins (or a shared office IP) never locks someone out of recovering.
+const recoveryLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 15,
+  ...limiterReply('Too many requests — wait 15 minutes and try again.'),
+});
 
 const customerView = (c: InstanceType<typeof Customer>) => ({
   id: c.id,
@@ -48,20 +66,21 @@ authRouter.post(
     const { name, email, password, phone, marketingOptIn } = req.body;
     const existing = await Customer.findOne({ email });
     if (existing && existing.passwordHash) throw ApiError.conflict('That email already has an account — sign in instead.');
+    // A record the team created (no password yet) holds that person's
+    // addresses and orders. Only the owner of the inbox may take it over —
+    // the reset flow proves that; a signup form does not.
+    if (existing) {
+      throw ApiError.conflict('An account already exists for this email. Use “Forgot password” to set your password.');
+    }
 
-    // Admin-created customers (no password yet) claim their account here.
-    const customer =
-      existing ??
-      new Customer({ name, email, phone, marketingOptIn, lastActiveAt: new Date() });
+    const customer = new Customer({ name, email, phone, marketingOptIn, lastActiveAt: new Date() });
     customer.passwordHash = hashPassword(password);
-    if (!customer.name) customer.name = name;
     await customer.save();
 
-    if (!existing) await logEvent('customer', `New customer ${name}`, email, `/customers/${customer.id}`);
-    const token = signCustomerToken(customer.id);
-    setCustomerSession(res, token);
+    await logEvent('customer', `New customer ${name}`, email, `/customers/${customer.id}`);
+    setCustomerSession(res, signCustomerToken(customer.id, customer.sessionVersion));
     await claimCartForCustomer(req, customer.id);
-    res.status(201).json({ ok: true, token, customer: customerView(customer) });
+    res.status(201).json({ ok: true, customer: customerView(customer) });
   }),
 );
 
@@ -83,17 +102,19 @@ authRouter.post(
     }
     customer.lastActiveAt = new Date();
     await customer.save();
-    const token = signCustomerToken(customer.id);
-    setCustomerSession(res, token);
+    setCustomerSession(res, signCustomerToken(customer.id, customer.sessionVersion));
     await claimCartForCustomer(req, customer.id);
-    res.json({ ok: true, token, customer: customerView(customer) });
+    res.json({ ok: true, customer: customerView(customer) });
   }),
 );
 
-authRouter.post('/logout', (_req, res) => {
+authRouter.post('/logout', asyncHandler(async (req, res) => {
   clearCustomerSession(res);
+  // The cart belongs to the person, not the browser: whoever signs in next
+  // on this machine starts empty.
+  await clearCartForRequest(req, res);
   res.json({ ok: true });
-});
+}));
 
 /* --------------------------------------------------------------------- me */
 authRouter.get(
@@ -199,7 +220,7 @@ authRouter.delete(
  */
 authRouter.post(
   '/email/request',
-  authLimiter,
+  recoveryLimiter,
   requireCustomer,
   validateBody(z.object({ email: z.string().trim().toLowerCase().email('That email does not look right.') })),
   asyncHandler(async (req, res) => {
@@ -223,7 +244,7 @@ authRouter.post(
 
 authRouter.post(
   '/email/confirm',
-  authLimiter,
+  recoveryLimiter,
   requireCustomer,
   validateBody(z.object({ email: z.string().trim().toLowerCase().email(), code: z.string().trim().length(6) })),
   asyncHandler(async (req, res) => {
@@ -257,7 +278,7 @@ authRouter.post(
 /* -------------------------------------------------------- forgot password */
 authRouter.post(
   '/forgot-password',
-  authLimiter,
+  recoveryLimiter,
   validateBody(z.object({ email: z.string().trim().toLowerCase().email() })),
   asyncHandler(async (req, res) => {
     const customer = await Customer.findOne({ email: req.body.email });
@@ -274,7 +295,7 @@ authRouter.post(
 
 authRouter.post(
   '/reset-password',
-  authLimiter,
+  recoveryLimiter,
   validateBody(z.object({ token: z.string().min(10), password: z.string().min(8) })),
   asyncHandler(async (req, res) => {
     const customer = await Customer.findOne({
@@ -284,6 +305,8 @@ authRouter.post(
     if (!customer) throw ApiError.badRequest('That reset link has expired — request a new one.');
     customer.passwordHash = hashPassword(req.body.password);
     customer.passwordResetToken = '';
+    // Every session that existed before the reset is now invalid.
+    customer.sessionVersion = (customer.sessionVersion ?? 0) + 1;
     customer.passwordResetExpires = null;
     await customer.save();
     res.json({ ok: true, message: 'Password updated — sign in with the new one.' });

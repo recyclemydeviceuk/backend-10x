@@ -1,5 +1,6 @@
-import { Router, raw } from 'express';
-import { Order, type OrderStatus } from '../models/Order';
+import { Router, raw, json } from 'express';
+import { env } from '../config/env';
+import { Order, canTransition, type OrderStatus } from '../models/Order';
 import { verifyCashfreeWebhook } from '../services/cashfree';
 import {
   markOrderConfirmedPaid,
@@ -162,9 +163,16 @@ webhooksRouter.post(
  * Shiprocket tracking webhook — Settings → API → Webhooks in Shiprocket.
  * Payload carries awb + current_status.
  */
-webhooksRouter.post('/shiprocket', async (req, res) => {
+webhooksRouter.post('/shiprocket', json({ limit: '1mb' }), async (req, res) => {
+  // Shiprocket sends the token configured in its dashboard as x-api-key.
+  // When one is set on the server, anything without it is ignored — without
+  // this check anyone who knows an AWB could mark a COD order delivered/paid.
+  if (env.shiprocket.webhookToken) {
+    const given = String(req.headers['x-api-key'] ?? req.headers['x-shiprocket-token'] ?? '');
+    if (given !== env.shiprocket.webhookToken) return res.status(401).json({ ok: false, message: 'Bad token.' });
+  }
   try {
-    const body = req.body as { awb?: string | number; current_status?: string };
+    const body = (req.body ?? {}) as { awb?: string | number; current_status?: string };
     const awb = String(body.awb ?? '');
     const current = String(body.current_status ?? '').toUpperCase();
     if (awb && current) {
@@ -173,9 +181,15 @@ webhooksRouter.post('/shiprocket', async (req, res) => {
       // A cancelled or returned order is settled — a late courier scan must
       // not drag it back onto the happy path.
       const terminal = order?.status === 'cancelled' || order?.status === 'returned';
-      if (order && mapped && mapped !== order.status && !terminal) {
-        order.notes.push({ by: 'Sync', text: `Courier webhook: ${current}.`, at: new Date() });
-        await applyStatusChange(order, mapped);
+      if (order) {
+        order.shipment.status = current;
+        order.shipment.lastSyncedAt = new Date();
+        if (mapped && mapped !== order.status && !terminal && canTransition(order.status, mapped)) {
+          order.notes.push({ by: 'Sync', text: `Courier webhook: ${current}.`, at: new Date() });
+          await applyStatusChange(order, mapped);
+        } else {
+          await order.save();
+        }
       }
     }
     res.json({ ok: true });

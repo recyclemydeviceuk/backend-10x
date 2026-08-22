@@ -63,6 +63,7 @@ adminSubscriptionsRouter.post(
     await emails.subscriptionStarted({
       email: customer.email,
       name: customer.name,
+      reference: sub.reference,
       planName: sub.planName,
       price: sub.price * sub.quantity,
       nextDelivery: sub.nextDelivery ?? null,

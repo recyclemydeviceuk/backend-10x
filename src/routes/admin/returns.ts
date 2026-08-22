@@ -160,6 +160,9 @@ adminReturnsRouter.post(
     if (!ret) throw ApiError.notFound('Return not found.');
     if (ret.status !== 'received') throw ApiError.badRequest('Refund once the parcel is received.');
     const order = await Order.findById(ret.orderId);
+    if (order && order.paymentStatus === 'refunded') {
+      throw ApiError.badRequest(`${order.reference} has already been refunded — nothing more to send back.`);
+    }
 
     if (ret.isPrepaid && order?.cashfree.orderId) {
       const refund = await createCashfreeRefund({
@@ -186,6 +189,13 @@ adminReturnsRouter.post(
     if (order) {
       order.status = 'returned';
       order.paymentStatus = 'refunded';
+      if (ret.refund.refundId) order.cashfree.refundId = ret.refund.refundId;
+      order.payment.refunds.push({
+        refundId: ret.refund.refundId || '',
+        amount: ret.amount,
+        at: new Date(),
+        note: `Return ${ret.reference}${ret.refund.mode === 'manual' ? ' (manual payout)' : ''}`,
+      });
       if (!order.timeline.some((t) => t.stage === 'returned')) {
         order.timeline.push({ stage: 'returned', at: new Date() });
       }
