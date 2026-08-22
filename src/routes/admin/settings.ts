@@ -6,7 +6,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { validateBody } from '../../middleware/validate';
 import { requirePermission } from '../../middleware/adminAuth';
 import { testCashfreeConnection, isCashfreeConfigured, cashfreeMode } from '../../services/cashfree';
-import { testShiprocketConnection, isShiprocketConfigured } from '../../services/shiprocket';
+import { testShiprocketConnection, isShiprocketConfigured, getPickupLocation } from '../../services/shiprocket';
 import { runSync } from '../../services/syncing';
 import { env } from '../../config/env';
 
@@ -33,6 +33,8 @@ adminSettingsRouter.get(
         shiprocket: {
           configured: await isShiprocketConfigured(),
           pickupLocation: env.shiprocket.pickupLocation,
+          // The warehouse as Shiprocket has it — managed there, shown here.
+          pickup: await getPickupLocation(),
         },
         s3: { configured: Boolean(env.s3.bucket), bucket: env.s3.bucket },
         email: {
@@ -45,10 +47,7 @@ adminSettingsRouter.get(
   }),
 );
 
-/**
- * Store identity, support contacts, cash-on-delivery, and the warehouse
- * Shiprocket picks up from and delivers returns to.
- */
+/** Store identity, support contacts and cash-on-delivery. The warehouse lives in Shiprocket. */
 adminSettingsRouter.patch(
   '/store',
   requirePermission('settings.delivery'),
@@ -58,16 +57,6 @@ adminSettingsRouter.patch(
       supportEmail: z.string().trim().email().optional(),
       supportPhone: z.string().trim().max(20).optional(),
       codEnabled: z.boolean().optional(),
-      warehouse: z
-        .object({
-          name: z.string().trim().max(80).default(''),
-          address: z.string().trim().max(200).default(''),
-          city: z.string().trim().max(60).default(''),
-          state: z.string().trim().max(60).default(''),
-          pincode: z.string().trim().regex(/^\d{6}$|^$/).default(''),
-          phone: z.string().trim().max(20).default(''),
-        })
-        .optional(),
     }),
   ),
   asyncHandler(async (req, res) => {
@@ -76,9 +65,8 @@ adminSettingsRouter.patch(
     if (req.body.supportEmail !== undefined) settings.store.supportEmail = req.body.supportEmail;
     if (req.body.supportPhone !== undefined) settings.store.supportPhone = req.body.supportPhone;
     if (req.body.codEnabled !== undefined) settings.store.codEnabled = req.body.codEnabled;
-    if (req.body.warehouse) Object.assign(settings.warehouse, req.body.warehouse);
     await settings.save();
-    res.json({ ok: true, store: settings.store, warehouse: settings.warehouse });
+    res.json({ ok: true, store: settings.store });
   }),
 );
 
@@ -138,7 +126,7 @@ adminSettingsRouter.patch(
   requirePermission('settings.delivery'),
   validateBody(
     z.object({
-      deliveryMode: z.enum(['free', 'priced']),
+      deliveryMode: z.enum(['free', 'priced', 'live']),
       flatShipping: z.number().min(0).max(100000).optional(),
       freeShippingOver: z.number().min(0).max(1000000).optional(),
     }),
@@ -151,7 +139,9 @@ adminSettingsRouter.patch(
     await settings.save();
     res.json({
       ok: true,
-      message: settings.store.deliveryMode === 'free'
+      message: settings.store.deliveryMode === 'live'
+        ? `Live Shiprocket rates${settings.store.freeShippingOver > 0 ? `, free over ₹${settings.store.freeShippingOver}` : ''}; ₹${settings.store.flatShipping} if Shiprocket can't quote.`
+        : settings.store.deliveryMode === 'free'
         ? 'Delivery is free on every order now.'
         : `Delivery charges ₹${settings.store.flatShipping} under ₹${settings.store.freeShippingOver}.`,
       delivery: {

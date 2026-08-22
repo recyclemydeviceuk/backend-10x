@@ -135,12 +135,17 @@ export async function cancelShiprocketOrder(srOrderId: string) {
   return sr('/orders/cancel', { method: 'POST', body: JSON.stringify({ ids: [Number(srOrderId)] }) });
 }
 
-/** Reverse pickup: customer address → warehouse (Settings → warehouse). */
+/** Reverse pickup: customer address → the warehouse Shiprocket has on file. */
 export async function createShiprocketReturn(ret: ReturnRequestDoc & { reference: string }, order: OrderDoc) {
+  const pickup = await getPickupLocation();
   const settings = await getSettings();
-  const wh = settings.warehouse;
+  // Shiprocket's pickup address is the source of truth; the stored warehouse
+  // block is only a fallback for an account with no pickup address yet.
+  const wh = pickup?.pincode
+    ? { name: pickup.name, address: [pickup.address, pickup.address2].filter(Boolean).join(', '), city: pickup.city, state: pickup.state, pincode: pickup.pincode, phone: pickup.phone }
+    : settings.warehouse;
   if (!wh?.address || !wh.pincode) {
-    throw ApiError.badRequest('Set the warehouse address in Settings → Shipping before approving returns.');
+    throw ApiError.badRequest('Add a pickup address in Shiprocket (Settings → Pickup Addresses) before approving returns.');
   }
   const [first, ...rest] = ret.customerName.split(' ');
   return sr<{ order_id: number; shipment_id: number }>('/orders/create/return', {
@@ -181,6 +186,117 @@ export async function createShiprocketReturn(ret: ReturnRequestDoc & { reference
       weight: env.shiprocket.packageWeightKg || 0.5,
     }),
   });
+}
+
+/* ------------------------------------------------------------ pickup */
+
+export type PickupLocation = {
+  name: string;
+  address: string;
+  address2: string;
+  city: string;
+  state: string;
+  pincode: string;
+  phone: string;
+};
+
+let pickupCache: { at: number; value: PickupLocation | null } | null = null;
+
+/**
+ * The warehouse, as Shiprocket knows it. Pickup addresses are managed in the
+ * Shiprocket dashboard (Settings → Pickup Addresses) — one place, verified
+ * by them — so this is read, never edited here. Matched by the nickname in
+ * SHIPROCKET_PICKUP_LOCATION, else the primary / first one. Cached 10 min.
+ */
+export async function getPickupLocation(): Promise<PickupLocation | null> {
+  if (pickupCache && Date.now() - pickupCache.at < 10 * 60_000) return pickupCache.value;
+  if (!(await isShiprocketConfigured())) return null;
+  try {
+    const res = await sr<{
+      data?: {
+        shipping_address?: Array<{
+          pickup_location?: string;
+          address?: string;
+          address_2?: string;
+          city?: string;
+          state?: string;
+          pin_code?: string | number;
+          phone?: string | number;
+          is_primary_location?: number | boolean;
+        }>;
+      };
+    }>('/settings/company/pickup');
+    const all = res.data?.shipping_address ?? [];
+    const want = env.shiprocket.pickupLocation.trim().toLowerCase();
+    const match =
+      all.find((a) => (a.pickup_location ?? '').trim().toLowerCase() === want) ??
+      all.find((a) => Boolean(a.is_primary_location)) ??
+      all[0];
+    const value: PickupLocation | null = match
+      ? {
+          name: match.pickup_location ?? '',
+          address: match.address ?? '',
+          address2: match.address_2 ?? '',
+          city: match.city ?? '',
+          state: match.state ?? '',
+          pincode: String(match.pin_code ?? ''),
+          phone: String(match.phone ?? ''),
+        }
+      : null;
+    pickupCache = { at: Date.now(), value };
+    return value;
+  } catch {
+    return pickupCache?.value ?? null;
+  }
+}
+
+/* ------------------------------------------------------------- rates */
+
+export type ShippingQuote = { fee: number; courier: string; etd: string; days: number | null };
+
+/**
+ * What Shiprocket would charge to send `weightKg` from the warehouse to a
+ * pincode. Uses Shiprocket's own recommended courier when it names one,
+ * else the cheapest serviceable option. Throws when nothing serves the pin.
+ */
+export async function quoteShipping(args: {
+  deliveryPincode: string;
+  weightKg: number;
+  cod: boolean;
+  declaredValue: number;
+}): Promise<ShippingQuote> {
+  const pickup = await getPickupLocation();
+  if (!pickup?.pincode) throw ApiError.badRequest('No pickup address is set in Shiprocket.');
+  const params = new URLSearchParams({
+    pickup_postcode: pickup.pincode,
+    delivery_postcode: args.deliveryPincode,
+    cod: args.cod ? '1' : '0',
+    weight: String(Math.max(args.weightKg, 0.1)),
+    declared_value: String(Math.max(Math.round(args.declaredValue), 1)),
+  });
+  const res = await sr<{
+    data?: {
+      recommended_courier_company_id?: number;
+      available_courier_companies?: Array<{
+        courier_company_id?: number;
+        courier_name?: string;
+        rate?: number | string;
+        etd?: string;
+        estimated_delivery_days?: string | number;
+      }>;
+    };
+  }>(`/courier/serviceability/?${params.toString()}`);
+  const options = (res.data?.available_courier_companies ?? []).filter((c) => Number(c.rate) > 0);
+  if (!options.length) throw ApiError.badRequest('No courier serves this pincode yet.');
+  const recommended = options.find((c) => c.courier_company_id === res.data?.recommended_courier_company_id);
+  const pick = recommended ?? options.slice().sort((a, b) => Number(a.rate) - Number(b.rate))[0];
+  const days = Number(pick.estimated_delivery_days);
+  return {
+    fee: Math.ceil(Number(pick.rate)),
+    courier: pick.courier_name ?? '',
+    etd: pick.etd ?? '',
+    days: Number.isFinite(days) && days > 0 ? days : null,
+  };
 }
 
 /** Maps Shiprocket tracking statuses onto our order statuses. */

@@ -10,8 +10,14 @@ const storeSchema = new Schema(
     supportPhone: { type: String, default: '' },
     /** When true the storefront shows only the coming-soon page (legal pages stay up). */
     comingSoonMode: { type: Boolean, default: false },
-    /** 'free' waives the delivery fee on every order; 'priced' uses the numbers below. */
-    deliveryMode: { type: String, enum: ['free', 'priced'], default: 'priced' },
+    /**
+     * 'free'   — no delivery fee, ever.
+     * 'priced' — flat fee below the free-delivery threshold.
+     * 'live'   — the real Shiprocket rate for the customer's pincode, fetched
+     *            as they shop; the flat fee is the fallback when Shiprocket
+     *            can't quote. The threshold still applies.
+     */
+    deliveryMode: { type: String, enum: ['free', 'priced', 'live'], default: 'priced' },
     freeShippingOver: { type: Number, default: 999 },
     flatShipping: { type: Number, default: 49 },
     codEnabled: { type: Boolean, default: true },

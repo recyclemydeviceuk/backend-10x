@@ -33,7 +33,7 @@ import {
   stampTimeline,
   cancelShipmentBooking,
 } from '../../services/orderLifecycle';
-import { getSettings } from '../../models/Setting';
+import { quoteDelivery } from '../../services/delivery';
 import { emails } from '../../services/emails';
 
 export const adminOrdersRouter = Router();
@@ -139,15 +139,17 @@ adminOrdersRouter.post(
       });
     }
     const subtotal = items.reduce((s, i) => s + (i.unitPrice as number) * (i.quantity as number), 0);
-    const settings = await getSettings();
     const shippingFee =
       req.body.shippingFee !== undefined
         ? req.body.shippingFee
-        : settings.store.deliveryMode === 'free'
-          ? 0
-          : subtotal - req.body.discount >= settings.store.freeShippingOver
-            ? 0
-            : settings.store.flatShipping;
+        : (
+            await quoteDelivery({
+              amount: subtotal - req.body.discount,
+              quantity: items.reduce((n, i) => n + (i.quantity as number), 0),
+              pincode: req.body.address.pincode,
+              cod: req.body.paymentMethod === 'cod',
+            })
+          ).fee;
     const total = subtotal - req.body.discount + shippingFee;
     const reference = await nextOrderReference();
     const order = await Order.create({

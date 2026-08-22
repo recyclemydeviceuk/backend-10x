@@ -951,7 +951,7 @@ async function saveSettings(p: Json): Promise<void> {
     s.store.supportEmail = str(store.supportEmail) || s.store.supportEmail;
     s.store.supportPhone = str(store.supportPhone);
     s.store.comingSoonMode = typeof store.comingSoonMode === 'boolean' ? store.comingSoonMode : s.store.comingSoonMode;
-    s.store.deliveryMode = store.deliveryMode === 'free' ? 'free' : store.deliveryMode === 'priced' ? 'priced' : s.store.deliveryMode;
+    s.store.deliveryMode = ['free', 'priced', 'live'].includes(str(store.deliveryMode)) ? (str(store.deliveryMode) as 'free' | 'priced' | 'live') : s.store.deliveryMode;
     s.store.freeShippingOver = num(store.freeShippingOver, s.store.freeShippingOver);
     s.store.flatShipping = num(store.flatShipping, s.store.flatShipping);
     s.store.codEnabled = bool(store.codEnabled);

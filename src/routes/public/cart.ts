@@ -55,12 +55,18 @@ async function repriced(line: Line | null): Promise<Line | null> {
 
 cartRouter.get('/cart', asyncHandler(async (req, res) => {
   const cart = await cartForRequest(req, res, customerId(req));
-  res.json({ ok: true, cart: { line: await repriced(cart?.line ?? null), couponCode: cart?.couponCode ?? '' } });
+  res.json({ ok: true, cart: { line: await repriced(cart?.line ?? null), couponCode: cart?.couponCode ?? '', pincode: cart?.pincode ?? '' } });
 }));
 
 cartRouter.put(
   '/cart',
-  validateBody(z.object({ line: lineSchema, couponCode: z.string().trim().toUpperCase().max(50).default('') })),
+  validateBody(
+    z.object({
+      line: lineSchema,
+      couponCode: z.string().trim().toUpperCase().max(50).default(''),
+      pincode: z.string().trim().regex(/^\d{6}$|^$/).default(''),
+    }),
+  ),
   asyncHandler(async (req, res) => {
     const id = ensureCartSession(req, res);
     await CartSession.findOneAndUpdate(
@@ -70,6 +76,7 @@ cartRouter.put(
           customerId: customerId(req),
           line: await repriced(req.body.line),
           couponCode: req.body.couponCode,
+          pincode: req.body.pincode,
           expiresAt: new Date(Date.now() + CART_EXPIRES_MS),
         },
       },

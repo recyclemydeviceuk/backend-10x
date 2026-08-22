@@ -8,6 +8,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { validateBody } from '../../middleware/validate';
 import { ApiError } from '../../utils/ApiError';
 import { optionalCustomer } from '../../middleware/customerAuth';
+import { quoteDelivery } from '../../services/delivery';
 
 export const catalogRouter = Router();
 
@@ -112,6 +113,24 @@ catalogRouter.get(
           minOrder: c.minOrderValue,
         })),
     });
+  }),
+);
+
+/* ------------------------------------------------------ delivery quote */
+// What the cart shows for "Delivery". Same function the checkout charges
+// with, so the two can never disagree.
+catalogRouter.post(
+  '/delivery/quote',
+  validateBody(
+    z.object({
+      amount: z.number().min(0),
+      quantity: z.number().int().min(1).max(99).default(1),
+      pincode: z.string().trim().regex(/^\d{6}$/).optional(),
+      cod: z.boolean().optional(),
+    }),
+  ),
+  asyncHandler(async (req, res) => {
+    res.json({ ok: true, quote: await quoteDelivery(req.body) });
   }),
 );
 

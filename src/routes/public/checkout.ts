@@ -13,6 +13,7 @@ import { requireCustomer } from '../../middleware/customerAuth';
 import { ApiError } from '../../utils/ApiError';
 import { createCashfreeOrder, isCashfreeConfigured, cashfreeMode } from '../../services/cashfree';
 import { env } from '../../config/env';
+import { quoteDelivery } from '../../services/delivery';
 import {
   markOrderConfirmedPaid,
   markPendingCheckoutFailed,
@@ -122,12 +123,13 @@ checkoutRouter.post(
       discount = resolved.discount;
     }
 
-    const shippingFee =
-      settings.store.deliveryMode === 'free'
-        ? 0
-        : subtotal - discount >= settings.store.freeShippingOver
-          ? 0
-          : settings.store.flatShipping;
+    const delivery = await quoteDelivery({
+      amount: subtotal - discount,
+      quantity: lineItems.reduce((n, i) => n + i.quantity, 0),
+      pincode: address.pincode,
+      cod: paymentMethod === 'cod',
+    });
+    const shippingFee = delivery.fee;
     const total = subtotal - discount + shippingFee;
 
     /* ------------------------------------------------------------- order */
